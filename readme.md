@@ -76,6 +76,15 @@ and coarse (great as a first-pass filter, typically re-ranked with full precisio
 val index = VectorIndex<String>(384, config = HnswConfig(quantization = Quantization.Int8))
 ```
 
+Binary is coarse, so pair it with a full-precision re-rank: over-fetch candidates, then re-score them
+against the original vectors (which you keep — a quantized index doesn't store them). This recovers
+accurate top-`k` at a fraction of the memory:
+
+```kotlin
+val coarse = index.search(query, k = 100)                       // binary: fast, approximate
+val exact = rerank(query, coarse.map { it.key }, k = 10) { fullVectors[it] }
+```
+
 Attach string attributes to entries and restrict a query with a `MetadataFilter`. For vector search
 the filter is applied *during* graph traversal, so a filtered query still returns up to `k` matches:
 
@@ -153,8 +162,8 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 7. **Analyzers** ✅ pluggable tokenizer: stemming, stop-words, CJK/substring n-grams.
 8. **kemus storage** ✅ optional `kromus-kemus` adapter — persist an index into a
    [kemus](https://github.com/kormium/kemus) store (embedded / offline→online sync).
-9. **Next** — full-precision re-rank helper for binary quantization; publish `kromus-kemus` once
-   kemus is on Maven Central.
+9. **Re-rank** ✅ `rerank(query, candidates, k) { fullVector }` — two-phase search for quantized indexes.
+10. **Next** — publish `kromus-kemus` once kemus is on Maven Central; more built-in analyzers.
 
 ## License
 
