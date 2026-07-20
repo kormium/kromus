@@ -25,7 +25,7 @@ public class TextIndex<K>(
     public val analyzer: Analyzer = Analyzer.standard(),
     public val config: Bm25Config = Bm25Config(),
 ) {
-    private class Doc(val termFreqs: Map<String, Int>, val length: Int)
+    private class Doc(val termFreqs: Map<String, Int>, val length: Int, val attributes: Map<String, String>)
 
     private val docs = HashMap<K, Doc>()
     // term -> (key -> term frequency in that document)
@@ -37,14 +37,17 @@ public class TextIndex<K>(
 
     public operator fun contains(key: K): Boolean = docs.containsKey(key)
 
-    /** Indexes [text] under [key], replacing any existing document for that key. */
-    public fun add(key: K, text: String) {
+    /**
+     * Indexes [text] under [key], replacing any existing document for that key. Optional [attributes]
+     * are stored with the document and can restrict later searches (see the `filter` of [search]).
+     */
+    public fun add(key: K, text: String, attributes: Map<String, String> = emptyMap()) {
         remove(key)
         val tokens = analyzer.analyze(text)
         val termFreqs = HashMap<String, Int>()
         for (t in tokens) termFreqs[t] = (termFreqs[t] ?: 0) + 1
 
-        docs[key] = Doc(termFreqs, tokens.size)
+        docs[key] = Doc(termFreqs, tokens.size, attributes)
         totalLength += tokens.size
         for ((term, f) in termFreqs) {
             postings.getOrPut(term) { HashMap() }[key] = f
@@ -68,7 +71,7 @@ public class TextIndex<K>(
      * has no indexable terms or nothing matches. [SearchResult.score] is the BM25 score (higher =
      * more relevant); its scale is corpus-dependent and not comparable across indexes.
      */
-    public fun search(query: String, k: Int): List<SearchResult<K>> {
+    public fun search(query: String, k: Int, filter: MetadataFilter? = null): List<SearchResult<K>> {
         require(k >= 1) { "k must be >= 1, was $k" }
         val n = docs.size
         if (n == 0) return emptyList()
@@ -94,23 +97,33 @@ public class TextIndex<K>(
         }
 
         return scores.entries
+            .asSequence()
+            .filter { filter == null || filter(docs[it.key]!!.attributes) }
             .sortedByDescending { it.value }
             .take(k)
             .map { SearchResult(it.key, it.value.toFloat()) }
+            .toList()
     }
 
     // --- persistence support (accessed by Persistence.kt) ---
 
-    /** (key, term frequencies, document length) for every indexed document. */
-    internal fun snapshot(): List<Triple<K, Map<String, Int>, Int>> =
-        docs.map { (key, doc) -> Triple(key, doc.termFreqs, doc.length) }
+    /** One entry per indexed document, carrying everything needed to rebuild it. */
+    internal fun snapshot(): List<TextEntry<K>> =
+        docs.map { (key, doc) -> TextEntry(key, doc.termFreqs, doc.length, doc.attributes) }
 
     /** Reinserts a pre-tokenized document, rebuilding postings without re-running the analyzer. */
-    internal fun loadDoc(key: K, termFreqs: Map<String, Int>, length: Int) {
-        docs[key] = Doc(termFreqs, length)
+    internal fun loadDoc(key: K, termFreqs: Map<String, Int>, length: Int, attributes: Map<String, String>) {
+        docs[key] = Doc(termFreqs, length, attributes)
         totalLength += length
         for ((term, f) in termFreqs) {
             postings.getOrPut(term) { HashMap() }[key] = f
         }
     }
 }
+
+internal class TextEntry<K>(
+    val key: K,
+    val termFreqs: Map<String, Int>,
+    val length: Int,
+    val attributes: Map<String, String>,
+)

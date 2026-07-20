@@ -35,6 +35,8 @@ internal class Hnsw private constructor(
     private val rng = Random(config.seed)
     private val levelMultiplier = 1.0 / ln(config.m.toDouble())
 
+    private val ACCEPT_ALL: (Int) -> Boolean = { true }
+
     /** Number of vectors ever inserted, including flagged-deleted ones (== the id space size). */
     val capacity: Int get() = store.size
 
@@ -67,11 +69,12 @@ internal class Hnsw private constructor(
             lc--
         }
 
-        // From the new node's top level down to 0: find neighbours, link, and prune.
+        // From the new node's top level down to 0: find neighbours, link, and prune. Construction
+        // considers every node (including deleted ones) so the graph stays connected.
         var entryPoints = intArrayOf(curr)
         lc = if (level < topLayer) level else topLayer
         while (lc >= 0) {
-            val candidates = searchLayer(prepared, entryPoints, config.efConstruction, lc)
+            val candidates = searchLayer(prepared, entryPoints, config.efConstruction, lc, ACCEPT_ALL)
             val selected = selectNeighbors(id, candidates, config.m)
             val mMax = if (lc == 0) config.maxM0 else config.m
 
@@ -98,10 +101,13 @@ internal class Hnsw private constructor(
     }
 
     /**
-     * Returns up to [k] non-deleted ids nearest to [rawVector], closest first, each paired with its
-     * similarity score (see [Metric]). [ef] is raised to at least [k].
+     * Returns up to [k] nearest ids to [rawVector] that are not deleted and satisfy [accept], closest
+     * first, each paired with its similarity score (see [Metric]). [ef] is raised to at least [k].
+     * [accept] is evaluated during the layer-0 search: rejected nodes are still traversed for
+     * connectivity but never returned, so a filtered query still yields up to [k] matches (a very
+     * selective filter benefits from a larger [ef]).
      */
-    fun query(rawVector: FloatArray, k: Int, ef: Int): List<Pair<Int, Float>> {
+    fun query(rawVector: FloatArray, k: Int, ef: Int, accept: (Int) -> Boolean = { true }): List<Pair<Int, Float>> {
         if (entryPoint == -1) return emptyList()
         val q = prepare(rawVector)
 
@@ -114,10 +120,10 @@ internal class Hnsw private constructor(
         }
 
         val efEff = if (ef < k) k else ef
-        val found = searchLayer(q, intArrayOf(curr), efEff, 0)
+        val acceptable = { id: Int -> !deleted[id] && accept(id) }
+        val found = searchLayer(q, intArrayOf(curr), efEff, 0, acceptable)
         val out = ArrayList<Pair<Int, Float>>(k)
         for (id in found) {
-            if (deleted[id]) continue
             out.add(id to similarityOf(store.distanceToQuery(q, id)))
             if (out.size >= k) break
         }
@@ -145,9 +151,17 @@ internal class Hnsw private constructor(
 
     /**
      * Best-first search on a single [layer]: expands the frontier from [entryPoints] until it can no
-     * longer improve the [ef] closest found. Returns those ids sorted ascending by distance to [query].
+     * longer improve the [ef] closest *acceptable* nodes. Every visited node is traversed, but only
+     * those passing [acceptable] enter the result set — so filtering happens mid-traversal, keeping
+     * the graph fully explorable. Returns the accepted ids sorted ascending by distance to [query].
      */
-    private fun searchLayer(query: FloatArray, entryPoints: IntArray, ef: Int, layer: Int): IntArray {
+    private fun searchLayer(
+        query: FloatArray,
+        entryPoints: IntArray,
+        ef: Int,
+        layer: Int,
+        acceptable: (Int) -> Boolean,
+    ): IntArray {
         val visited = HashSet<Int>()
         val frontier = FloatHeap(minHeap = true)
         val best = FloatHeap(minHeap = false)
@@ -156,7 +170,10 @@ internal class Hnsw private constructor(
             if (!visited.add(ep)) continue
             val d = store.distanceToQuery(query, ep)
             frontier.push(ep, d)
-            best.push(ep, d)
+            if (acceptable(ep)) {
+                best.push(ep, d)
+                if (best.size > ef) best.pop()
+            }
         }
 
         while (!frontier.isEmpty()) {
@@ -166,10 +183,14 @@ internal class Hnsw private constructor(
             for (e in neighborsAt(c, layer)) {
                 if (!visited.add(e)) continue
                 val d = store.distanceToQuery(query, e)
-                if (best.size < ef || d < best.peekKey()) {
+                // Explore whenever results aren't full yet or this node beats the current worst.
+                val bound = if (best.size < ef) Float.MAX_VALUE else best.peekKey()
+                if (d < bound) {
                     frontier.push(e, d)
-                    best.push(e, d)
-                    if (best.size > ef) best.pop()
+                    if (acceptable(e)) {
+                        best.push(e, d)
+                        if (best.size > ef) best.pop()
+                    }
                 }
             }
         }

@@ -6,8 +6,8 @@ package io.github.kromus
 // bits). Analyzers are functions and cannot be serialized, so text/hybrid loaders take the analyzer
 // the index was built with — supply the same one for consistent query tokenization.
 
-private const val VECTOR_FORMAT: Int = 2
-private const val TEXT_FORMAT: Int = 1
+private const val VECTOR_FORMAT: Int = 3
+private const val TEXT_FORMAT: Int = 2
 private const val HYBRID_FORMAT: Int = 1
 
 /** Serializes this vector index (graph + key mapping) to a byte array. */
@@ -52,6 +52,12 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
     for ((key, id) in live) {
         w.bytes(keyCodec.encode(key))
         w.int(id)
+        val attrs = attributesAt(id)
+        w.int(attrs.size)
+        for ((ak, av) in attrs) {
+            w.bytes(ak.encodeToByteArray())
+            w.bytes(av.encodeToByteArray())
+        }
     }
     return w.toByteArray()
 }
@@ -84,13 +90,24 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
 
     val liveCount = r.int()
     val live = HashMap<K, Int>(liveCount * 2)
+    val liveAttrs = HashMap<Int, Map<String, String>>()
     repeat(liveCount) {
         val key = keyCodec.decode(r.bytes())
-        live[key] = r.int()
+        val id = r.int()
+        live[key] = id
+        val attrCount = r.int()
+        if (attrCount > 0) {
+            val attrs = HashMap<String, String>(attrCount * 2)
+            repeat(attrCount) {
+                val ak = r.bytes().decodeToString()
+                attrs[ak] = r.bytes().decodeToString()
+            }
+            liveAttrs[id] = attrs
+        }
     }
 
     val hnsw = Hnsw.restore(metric, config, store, levels, neighbors, deleted, entryPoint, topLayer)
-    return VectorIndex.fromState(dimensions, metric, config, hnsw, live, n)
+    return VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n)
 }
 
 /** Serializes this full-text index to a byte array. The analyzer is not stored (see [decodeTextIndex]). */
@@ -102,13 +119,18 @@ public fun <K> TextIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray 
 
     val docs = snapshot()
     w.int(docs.size)
-    for ((key, termFreqs, length) in docs) {
-        w.bytes(keyCodec.encode(key))
-        w.int(length)
-        w.int(termFreqs.size)
-        for ((term, freq) in termFreqs) {
+    for (doc in docs) {
+        w.bytes(keyCodec.encode(doc.key))
+        w.int(doc.length)
+        w.int(doc.termFreqs.size)
+        for ((term, freq) in doc.termFreqs) {
             w.bytes(term.encodeToByteArray())
             w.int(freq)
+        }
+        w.int(doc.attributes.size)
+        for ((ak, av) in doc.attributes) {
+            w.bytes(ak.encodeToByteArray())
+            w.bytes(av.encodeToByteArray())
         }
     }
     return w.toByteArray()
@@ -138,7 +160,13 @@ public fun <K> decodeTextIndex(
             val term = r.bytes().decodeToString()
             termFreqs[term] = r.int()
         }
-        index.loadDoc(key, termFreqs, length)
+        val attrCount = r.int()
+        val attributes = HashMap<String, String>(attrCount * 2)
+        repeat(attrCount) {
+            val ak = r.bytes().decodeToString()
+            attributes[ak] = r.bytes().decodeToString()
+        }
+        index.loadDoc(key, termFreqs, length, attributes)
     }
     return index
 }

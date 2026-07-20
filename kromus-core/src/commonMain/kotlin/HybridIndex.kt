@@ -54,10 +54,13 @@ public class HybridIndex<K> private constructor(
 
     public operator fun contains(key: K): Boolean = key in keys
 
-    /** Adds or replaces the entry [key] with its [vector] and [text]. */
-    public fun add(key: K, vector: FloatArray, text: String) {
-        vectorIndex.add(key, vector)
-        textIndex.add(key, text)
+    /**
+     * Adds or replaces the entry [key] with its [vector] and [text]. Optional [attributes] are stored
+     * on both modalities and can restrict later searches via the `filter` of [search].
+     */
+    public fun add(key: K, vector: FloatArray, text: String, attributes: Map<String, String> = emptyMap()) {
+        vectorIndex.add(key, vector, attributes)
+        textIndex.add(key, text, attributes)
         keys.add(key)
     }
 
@@ -75,6 +78,7 @@ public class HybridIndex<K> private constructor(
      * @param candidates how many hits to pull from each retriever before fusion. Larger widens the
      *   pool RRF can draw from (better recall) at some cost; defaults to a multiple of [k].
      * @param efSearch vector-search breadth; see [VectorIndex.search].
+     * @param filter optional predicate over each entry's [attributes][add]; applied to both retrievers.
      */
     public fun search(
         vector: FloatArray,
@@ -82,20 +86,25 @@ public class HybridIndex<K> private constructor(
         k: Int,
         candidates: Int = maxOf(k * 4, 50),
         efSearch: Int = hnswConfig.efSearch,
+        filter: MetadataFilter? = null,
     ): List<SearchResult<K>> {
         require(k >= 1) { "k must be >= 1, was $k" }
-        val vectorHits = vectorIndex.search(vector, candidates, efSearch).map { it.key }
-        val textHits = textIndex.search(text, candidates).map { it.key }
+        val vectorHits = vectorIndex.search(vector, candidates, efSearch, filter).map { it.key }
+        val textHits = textIndex.search(text, candidates, filter).map { it.key }
         return Rrf.fuse(listOf(vectorHits, textHits), limit = k, k = rrfK)
     }
 
     /** Vector-only retrieval, bypassing fusion. */
-    public fun searchVector(vector: FloatArray, k: Int, efSearch: Int = hnswConfig.efSearch): List<SearchResult<K>> =
-        vectorIndex.search(vector, k, efSearch)
+    public fun searchVector(
+        vector: FloatArray,
+        k: Int,
+        efSearch: Int = hnswConfig.efSearch,
+        filter: MetadataFilter? = null,
+    ): List<SearchResult<K>> = vectorIndex.search(vector, k, efSearch, filter)
 
     /** Text-only (BM25) retrieval, bypassing fusion. */
-    public fun searchText(text: String, k: Int): List<SearchResult<K>> =
-        textIndex.search(text, k)
+    public fun searchText(text: String, k: Int, filter: MetadataFilter? = null): List<SearchResult<K>> =
+        textIndex.search(text, k, filter)
 
     // --- persistence support (accessed by Persistence.kt) ---
 

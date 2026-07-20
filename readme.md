@@ -15,8 +15,8 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.4.0`, pre-1.0. All three layers, binary persistence and int8 quantization are
-> usable today; the API may still change before 1.0. See the roadmap for what's next.
+> **Status:** `0.5.0`, pre-1.0. All three layers, binary persistence, int8 quantization and metadata
+> filters are usable today; the API may still change before 1.0. See the roadmap for what's next.
 
 ## Why it exists
 
@@ -40,7 +40,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.4.0")
+        implementation("io.github.kormium:kromus-core:0.5.0")
     }
 }
 ```
@@ -71,6 +71,14 @@ To cut memory ~4× on device, store vectors quantized — queries still run at f
 
 ```kotlin
 val index = VectorIndex<String>(384, config = HnswConfig(quantization = Quantization.Int8))
+```
+
+Attach string attributes to entries and restrict a query with a `MetadataFilter`. For vector search
+the filter is applied *during* graph traversal, so a filtered query still returns up to `k` matches:
+
+```kotlin
+index.add("doc-1", embedding, attributes = mapOf("type" to "doc", "lang" to "en"))
+index.search(query, k = 10) { it["type"] == "doc" && it["lang"] == "en" }
 ```
 
 ### Full-text and hybrid
@@ -125,8 +133,9 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 3. **Hybrid** ✅ RRF fusion of vector + full-text (`HybridIndex`).
 4. **Persistence** ✅ Compact, cross-platform binary encode/decode for all three indexes.
 5. **Quantization** ✅ int8 scalar quantization (~4× smaller), asymmetric full-precision queries.
-6. **Next** — metadata filters on queries; binary (1-bit) quantization; richer analyzers (stemming,
-   CJK n-grams); optional [kemus](https://github.com/kemus/kemus)-backed storage.
+6. **Metadata filters** ✅ string attributes + `MetadataFilter`, applied mid-traversal for vectors.
+7. **Next** — binary (1-bit) quantization; richer analyzers (stemming, CJK n-grams); optional
+   [kemus](https://github.com/kemus/kemus)-backed storage.
 
 ## License
 

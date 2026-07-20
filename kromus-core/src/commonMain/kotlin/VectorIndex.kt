@@ -43,9 +43,10 @@ public class VectorIndex<K> private constructor(
     }
 
     // Bidirectional key <-> internal-id mapping. keyOf is id-indexed and grows once per HNSW insert
-    // (ids are never reused); a removed or replaced slot is nulled out.
+    // (ids are never reused); a removed or replaced slot is nulled out. attrsOf is id-indexed too.
     private val idOf = HashMap<K, Int>()
     private val keyOf = ArrayList<K?>()
+    private val attrsOf = ArrayList<Map<String, String>>()
 
     /** Number of live (non-removed) entries. */
     public val size: Int get() = idOf.size
@@ -54,10 +55,12 @@ public class VectorIndex<K> private constructor(
 
     /**
      * Inserts [vector] under [key], replacing any existing vector for that key. The array is copied.
+     * Optional [attributes] are stored with the entry and can be used to restrict later searches (see
+     * the `filter` parameter of [search]).
      *
      * @throws IllegalArgumentException if `vector.size != dimensions`.
      */
-    public fun add(key: K, vector: FloatArray) {
+    public fun add(key: K, vector: FloatArray, attributes: Map<String, String> = emptyMap()) {
         require(vector.size == dimensions) {
             "vector has ${vector.size} dimensions, expected $dimensions"
         }
@@ -67,9 +70,10 @@ public class VectorIndex<K> private constructor(
         }
         val id = hnsw.add(vector)
         // Every hnsw.add() appends exactly one id equal to the current capacity - 1, kept in lockstep
-        // with keyOf, so the new id always lands at the end of keyOf.
+        // with keyOf/attrsOf, so the new id always lands at the end of both.
         check(id == keyOf.size) { "index desynchronized: id=$id, keyOf.size=${keyOf.size}" }
         keyOf.add(key)
+        attrsOf.add(attributes)
         idOf[key] = id
     }
 
@@ -92,18 +96,23 @@ public class VectorIndex<K> private constructor(
      *
      * @param efSearch dynamic candidate-list size for this query; larger trades latency for recall.
      *   Defaults to [HnswConfig.efSearch] and is raised to at least [k].
+     * @param filter optional predicate over each entry's [attributes][add]; only entries it accepts
+     *   are returned. Applied during traversal, so a filtered query still yields up to [k] matches
+     *   (a very selective filter benefits from a larger [efSearch]).
      * @throws IllegalArgumentException if `query.size != dimensions` or `k < 1`.
      */
     public fun search(
         query: FloatArray,
         k: Int,
         efSearch: Int = config.efSearch,
+        filter: MetadataFilter? = null,
     ): List<SearchResult<K>> {
         require(query.size == dimensions) {
             "query has ${query.size} dimensions, expected $dimensions"
         }
         require(k >= 1) { "k must be >= 1, was $k" }
-        return hnsw.query(query, k, efSearch).mapNotNull { (id, score) ->
+        val accept: (Int) -> Boolean = if (filter == null) { { true } } else { { id -> filter(attrsOf[id]) } }
+        return hnsw.query(query, k, efSearch, accept).mapNotNull { (id, score) ->
             keyOf[id]?.let { SearchResult(it, score) }
         }
     }
@@ -115,21 +124,30 @@ public class VectorIndex<K> private constructor(
     /** Live key -> internal id, in iteration order. */
     internal fun liveEntries(): Map<K, Int> = idOf
 
+    internal fun attributesAt(id: Int): Map<String, String> = attrsOf[id]
+
     internal companion object {
-        /** Rebuilds an index from a restored graph and its live key mapping. */
+        /** Rebuilds an index from a restored graph, its live key mapping and per-id attributes. */
         fun <K> fromState(
             dimensions: Int,
             metric: Metric,
             config: HnswConfig,
             hnsw: Hnsw,
             liveKeys: Map<K, Int>,
+            liveAttrs: Map<Int, Map<String, String>>,
             capacity: Int,
         ): VectorIndex<K> {
             val index = VectorIndex<K>(dimensions, metric, config, hnsw)
-            repeat(capacity) { index.keyOf.add(null) }
+            repeat(capacity) {
+                index.keyOf.add(null)
+                index.attrsOf.add(emptyMap())
+            }
             for ((key, id) in liveKeys) {
                 index.idOf[key] = id
                 index.keyOf[id] = key
+            }
+            for ((id, attrs) in liveAttrs) {
+                index.attrsOf[id] = attrs
             }
             return index
         }
