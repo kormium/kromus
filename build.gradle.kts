@@ -49,6 +49,20 @@ allprojects {
     }
 }
 
+// The optional :kromus-kemus module pulls in the sibling `kemus` build (a composite build). Composite
+// builds share ONE yarn root, so kemus's JS/Wasm npm deps get merged into it — a lock that matches
+// neither kromus-core's committed lock nor a plain clone's (where kemus isn't included at all). A
+// single committed lock therefore can't satisfy the strict (FAIL) mismatch check in both
+// configurations, so downgrade it to a warning for JS and Wasm.
+plugins.withType(org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin::class.java) {
+    the<org.jetbrains.kotlin.gradle.targets.js.yarn.YarnRootEnvSpec>()
+        .yarnLockMismatchReport.set(org.jetbrains.kotlin.gradle.targets.js.yarn.YarnLockMismatchReport.WARNING)
+}
+plugins.withType(org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnPlugin::class.java) {
+    the<org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnRootEnvSpec>()
+        .yarnLockMismatchReport.set(org.jetbrains.kotlin.gradle.targets.js.yarn.YarnLockMismatchReport.WARNING)
+}
+
 // Publishing to Maven Central, shared by the library modules. Credentials
 // (mavenCentralUsername/Password) and the GPG key (signingInMemoryKey/Password) are supplied
 // out-of-band via ORG_GRADLE_PROJECT_* env vars in CI — see gradle.properties.

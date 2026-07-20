@@ -119,6 +119,15 @@ val bytes: ByteArray = index.encodeToByteArray(KeyCodec.string)
 val reloaded = decodeHybridIndex(bytes, KeyCodec.string)      // or decodeVectorIndex / decodeTextIndex
 ```
 
+The optional **`kromus-kemus`** module stores an index in a [kemus](https://github.com/kormium/kemus)
+store (binary value), so it inherits kemus's persistence, TTL and offline→online sync — build once,
+reload instantly:
+
+```kotlin
+index.saveTo(kemus, "my-index", KeyCodec.string)
+val reloaded = loadHybridIndex(kemus, "my-index", KeyCodec.string)
+```
+
 ## Design principles
 
 - **Zero dependencies** in the vector layer. HNSW is arithmetic over `FloatArray` and graph
@@ -142,8 +151,10 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 5. **Quantization** ✅ int8 (~4×) and binary (~32×) quantization, asymmetric full-precision queries.
 6. **Metadata filters** ✅ string attributes + `MetadataFilter`, applied mid-traversal for vectors.
 7. **Analyzers** ✅ pluggable tokenizer: stemming, stop-words, CJK/substring n-grams.
-8. **Next** — optional [kemus](https://github.com/kemus/kemus)-backed storage; full-precision re-rank
-   helper for binary quantization.
+8. **kemus storage** ✅ optional `kromus-kemus` adapter — persist an index into a
+   [kemus](https://github.com/kormium/kemus) store (embedded / offline→online sync).
+9. **Next** — full-precision re-rank helper for binary quantization; publish `kromus-kemus` once
+   kemus is on Maven Central.
 
 ## License
 
