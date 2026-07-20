@@ -35,6 +35,7 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
                 for (b in store.codeAt(id)) w.byte(b.toInt())
                 w.float(store.scaleAt(id))
             }
+            is BinaryVectorStore -> for (word in store.codeAt(id)) w.long(word)
             else -> error("unknown vector store")
         }
         w.byte(if (g.deletedAt(id)) 1 else 0)
@@ -80,6 +81,7 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
         when (store) {
             is Float32VectorStore -> store.load(FloatArray(dimensions) { r.float() })
             is Int8VectorStore -> store.load(ByteArray(dimensions) { r.byte().toByte() }, r.float())
+            is BinaryVectorStore -> store.load(LongArray((dimensions + 63) ushr 6) { r.long() })
             else -> error("unknown vector store")
         }
         deleted[id] = r.byte() == 1

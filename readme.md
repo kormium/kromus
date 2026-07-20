@@ -15,8 +15,8 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.5.0`, pre-1.0. All three layers, binary persistence, int8 quantization and metadata
-> filters are usable today; the API may still change before 1.0. See the roadmap for what's next.
+> **Status:** `0.6.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization and
+> metadata filters are usable today; the API may still change before 1.0. See the roadmap for next.
 
 ## Why it exists
 
@@ -40,7 +40,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.5.0")
+        implementation("io.github.kormium:kromus-core:0.6.0")
     }
 }
 ```
@@ -67,7 +67,9 @@ val hits: List<SearchResult<String>> = index.search(embed("async programming"), 
 Re-adding a key replaces its vector; `remove(key)` drops it from results. See the KDoc on
 `VectorIndex`, `HnswConfig` and `Metric` for tuning.
 
-To cut memory ~4× on device, store vectors quantized — queries still run at full precision:
+To cut memory on device, store vectors quantized — queries still run at full precision (asymmetric).
+`Quantization.Int8` is ~4× smaller with a small recall cost; `Quantization.Binary` is ~32× smaller
+and coarse (great as a first-pass filter, typically re-ranked with full precision):
 
 ```kotlin
 val index = VectorIndex<String>(384, config = HnswConfig(quantization = Quantization.Int8))
@@ -132,9 +134,9 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 2. **Full-text layer** ✅ Inverted index + BM25, pluggable analyzers.
 3. **Hybrid** ✅ RRF fusion of vector + full-text (`HybridIndex`).
 4. **Persistence** ✅ Compact, cross-platform binary encode/decode for all three indexes.
-5. **Quantization** ✅ int8 scalar quantization (~4× smaller), asymmetric full-precision queries.
+5. **Quantization** ✅ int8 (~4×) and binary (~32×) quantization, asymmetric full-precision queries.
 6. **Metadata filters** ✅ string attributes + `MetadataFilter`, applied mid-traversal for vectors.
-7. **Next** — binary (1-bit) quantization; richer analyzers (stemming, CJK n-grams); optional
+7. **Next** — richer analyzers (stemming, CJK n-grams); optional
    [kemus](https://github.com/kemus/kemus)-backed storage.
 
 ## License

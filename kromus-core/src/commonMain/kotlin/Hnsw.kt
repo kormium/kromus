@@ -277,6 +277,7 @@ internal class Hnsw private constructor(
             when (quantization) {
                 Quantization.None -> Float32VectorStore(dimensions, metric)
                 Quantization.Int8 -> Int8VectorStore(dimensions, metric)
+                Quantization.Binary -> BinaryVectorStore(dimensions, metric)
             }
 
         /** Rebuilds a graph over an already-populated [store], bypassing insertion. */

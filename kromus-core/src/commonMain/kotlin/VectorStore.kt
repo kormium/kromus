@@ -163,3 +163,76 @@ internal class Int8VectorStore(
         return codes.size - 1
     }
 }
+
+/**
+ * 1-bit-per-dimension quantization: each component is reduced to its sign (~32× smaller). Stored
+ * vectors are compared with Hamming distance (packed 64-bit words + popcount); the full-precision
+ * query is compared against the ±1 sign vector directly (asymmetric).
+ */
+internal class BinaryVectorStore(
+    override val dimensions: Int,
+    override val metric: Metric,
+) : VectorStore {
+    private val words = (dimensions + 63) ushr 6
+    private val codes = ArrayList<LongArray>()
+    private val invSqrtDim = 1f / sqrt(dimensions.toFloat())
+
+    override val size: Int get() = codes.size
+
+    override fun add(prepared: FloatArray): Int {
+        val bits = LongArray(words)
+        for (i in 0 until dimensions) {
+            if (prepared[i] >= 0f) bits[i ushr 6] = bits[i ushr 6] or (1L shl (i and 63))
+        }
+        codes.add(bits)
+        return codes.size - 1
+    }
+
+    private fun signAt(bits: LongArray, i: Int): Float =
+        if ((bits[i ushr 6] ushr (i and 63)) and 1L == 1L) 1f else -1f
+
+    override fun distanceToQuery(query: FloatArray, id: Int): Float {
+        val bits = codes[id]
+        return when (metric) {
+            Metric.Cosine -> {
+                var dot = 0f
+                for (i in 0 until dimensions) dot += query[i] * signAt(bits, i)
+                1f - dot * invSqrtDim
+            }
+            Metric.DotProduct -> {
+                var dot = 0f
+                for (i in 0 until dimensions) dot += query[i] * signAt(bits, i)
+                -dot
+            }
+            Metric.Euclidean -> {
+                var acc = 0f
+                for (i in 0 until dimensions) {
+                    val d = query[i] - signAt(bits, i)
+                    acc += d * d
+                }
+                sqrt(acc)
+            }
+        }
+    }
+
+    override fun distanceBetween(a: Int, b: Int): Float {
+        val ca = codes[a]
+        val cb = codes[b]
+        var hamming = 0
+        for (w in 0 until words) hamming += (ca[w] xor cb[w]).countOneBits()
+        return when (metric) {
+            // dot of two ±1 vectors = dimensions - 2*hamming.
+            Metric.Cosine -> 2f * hamming / dimensions
+            Metric.DotProduct -> (2 * hamming - dimensions).toFloat()
+            Metric.Euclidean -> sqrt(4f * hamming)
+        }
+    }
+
+    fun codeAt(id: Int): LongArray = codes[id]
+
+    /** Restores a quantized vector verbatim (persistence). */
+    fun load(code: LongArray): Int {
+        codes.add(code)
+        return codes.size - 1
+    }
+}
