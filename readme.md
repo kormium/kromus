@@ -15,9 +15,10 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.7.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
-> metadata filters and pluggable analyzers (stemming, stop-words, CJK n-grams) are usable today; the
-> API may still change before 1.0. See the roadmap for what's next.
+> **Status:** `0.9.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> metadata filters, pluggable analyzers (stemming, stop-words, CJK n-grams), full-precision re-rank
+> and an optional kemus storage adapter are usable today; the API may still change before 1.0. See
+> the roadmap for what's next.
 
 ## Why it exists
 
@@ -41,16 +42,16 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.7.0")
+        implementation("io.github.kormium:kromus-core:0.9.0")
     }
 }
 ```
 
 ## Quick start
 
-kromus is **embedder-agnostic**: you bring the vectors (from any on-device or server embedding model
-— ONNX Runtime, MediaPipe Text Embedder, a backend API, …) as `FloatArray`s. kromus owns storage,
-graph construction and retrieval.
+kromus is **embedder-agnostic**: you bring the vectors (from any on-device or server embedding model)
+as `FloatArray`s — see [Embeddings](#embeddings) — and kromus owns storage, graph construction and
+retrieval.
 
 ```kotlin
 import io.github.kromus.*
@@ -137,6 +138,59 @@ index.saveTo(kemus, "my-index", KeyCodec.string)
 val reloaded = loadHybridIndex(kemus, "my-index", KeyCodec.string)
 ```
 
+## Use cases
+
+kromus is a search *primitive*, so it powers more than a search box:
+
+- **On-device search** — notes, mail, messages, documents, bookmarks. Private, offline, no server and
+  no per-query cost. Hybrid (vector + BM25) plus metadata filters give both meaning and exact-token
+  matches; n-gram analyzers add typo-tolerant and CJK search.
+- **On-device / local RAG** — retrieve the most relevant chunks of the user's *own* data to feed a
+  local (or remote) LLM, without shipping private data to a server. kromus is the retriever;
+  quantization + `rerank` keep it small on device yet accurate.
+- **Similarity & recommendations** — "more like this", related items, and near-duplicate detection /
+  semantic dedup (contacts, tickets, media), on device or on the backend.
+- **Classification & routing via k-NN** — match a query embedding against labelled exemplars for
+  intent detection, auto-tagging or moderation triage. The product is a label, not a result list.
+- **Semantic cache for LLM calls** — before calling the model, check whether a *similar* prompt was
+  already answered; serve the cached answer and save tokens and latency.
+- **Backend / edge search** — an embedded index inside a Kotlin/Ktor service for small-to-medium
+  corpora (no separate search cluster), and — via the Native/Wasm targets — in edge/serverless
+  runtimes where JVM-only Lucene won't run.
+- **Offline-first apps with sync** — build the index, store it in a [kemus](https://github.com/kormium/kemus)
+  binary value, and get persistence, TTL and offline→online sync (field, logistics, healthcare, retail).
+
+**Where it doesn't fit:** web-scale corpora (hundreds of millions of vectors, sharded/distributed)
+belong in a server-side vector DB — kromus is embedded. And it *indexes* vectors; you supply the model.
+
+## Embeddings
+
+kromus indexes vectors; it does not compute them — **by design**. On-device embedding models are
+heavy, platform-specific (native runtimes), separately licensed and versioned, and don't cover every
+KMP target uniformly. Keeping them out of the core is exactly what lets kromus stay zero-dependency
+and behave identically everywhere. You produce a `FloatArray` however you like and hand it in; that
+`embed(...)` in the examples is your embedder.
+
+Where the vectors typically come from:
+
+- **On-device (Android / iOS / desktop)**
+  - **ONNX Runtime** — run a sentence-transformer exported to ONNX (e.g. `all-MiniLM-L6-v2` at 384
+    dims, or `multilingual-e5-small`). One model, all mobile/desktop targets via the ONNX native libs.
+  - **MediaPipe Text Embedder** (Google AI Edge) — Android / iOS.
+  - **Apple NaturalLanguage** sentence embeddings — iOS / macOS.
+- **Server / JVM** — any embedding API (OpenAI, Cohere, Voyage, Jina), local models via Ollama /
+  llama.cpp, or JVM libraries (DJL, ONNX Runtime for the JVM).
+- **No model (lexical)** — a hashing / character-n-gram vectorizer produces fuzzy *lexical* vectors
+  with zero dependencies on every target: handy for demos and typo-tolerance, but **not semantic**
+  (for lexical relevance, prefer `TextIndex`/BM25).
+
+**Contract:** every vector in one index must have the same `dimensions` and come from the *same*
+model — store the model id/version next to the index so you never mix embeddings from different models.
+
+**Batteries-included?** The core stays model-free on purpose. A convenience embedder is planned as an
+*optional* adapter module (e.g. `kromus-onnx`) so you can opt into a ready-to-run setup without
+weighing down the zero-dependency core — see the roadmap.
+
 ## Design principles
 
 - **Zero dependencies** in the vector layer. HNSW is arithmetic over `FloatArray` and graph
@@ -163,7 +217,8 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 8. **kemus storage** ✅ optional `kromus-kemus` adapter — persist an index into a
    [kemus](https://github.com/kormium/kemus) store (embedded / offline→online sync).
 9. **Re-rank** ✅ `rerank(query, candidates, k) { fullVector }` — two-phase search for quantized indexes.
-10. **Next** — publish `kromus-kemus` once kemus is on Maven Central; more built-in analyzers.
+10. **Next** — optional `kromus-onnx` embedder adapter (batteries-included, ONNX Runtime); publish
+    `kromus-kemus` once kemus is on Maven Central; more built-in analyzers.
 
 ## License
 
