@@ -8,13 +8,15 @@ native library to link, no per-platform build, no server.
 
 It ships in layers:
 
-- **Vector search** *(v0, this release)* — a pure-Kotlin [HNSW](https://en.wikipedia.org/wiki/Hierarchical_navigable_small_world)
+- **Vector search** — a pure-Kotlin [HNSW](https://en.wikipedia.org/wiki/Hierarchical_navigable_small_world)
   approximate-nearest-neighbour index for semantic / similarity search over embeddings.
-- **Full-text search** *(planned)* — an inverted index with BM25 ranking and pluggable analyzers.
-- **Hybrid queries** *(planned)* — vector + full-text fused with Reciprocal Rank Fusion (RRF), the
-  2026 best practice that lifts recall well above either retriever alone.
+- **Full-text search** — an inverted index with [BM25](https://en.wikipedia.org/wiki/Okapi_BM25)
+  ranking and pluggable analyzers.
+- **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
+  practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.1.0`, pre-1.0. The vector layer is usable today; the API may still change before 1.0.
+> **Status:** `0.2.0`, pre-1.0. All three layers are usable today; the API may still change before 1.0.
+> Persistence and quantization are next — see the roadmap.
 
 ## Why it exists
 
@@ -30,7 +32,7 @@ KMP matrix**. That is the gap kromus fills.
 | vectorlite / hnswlib    |     ✓      |        ✗         |      ✗       |     C++, per-platform          |
 | ObjectBox               |     ✓      |        ✗         |      ✗       |     ✗ (Android/JVM + iOS SDK)  |
 | SQLite FTS5             |     ✗      |        ✓         |      ✗       |     tied to SQLite             |
-| **kromus**              |     ✓      |    ✓ *(planned)* | ✓ *(planned)*|     ✓ **common code**          |
+| **kromus**              |     ✓      |        ✓         |      ✓       |     ✓ **common code**          |
 
 ## Install
 
@@ -38,7 +40,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.1.0")
+        implementation("io.github.kormium:kromus-core:0.2.0")
     }
 }
 ```
@@ -65,6 +67,26 @@ val hits: List<SearchResult<String>> = index.search(embed("async programming"), 
 Re-adding a key replaces its vector; `remove(key)` drops it from results. See the KDoc on
 `VectorIndex`, `HnswConfig` and `Metric` for tuning.
 
+### Full-text and hybrid
+
+`TextIndex` is a standalone BM25 index; `HybridIndex` combines a vector and a text index and fuses
+their rankings with RRF — the recommended default, because vector search captures meaning while BM25
+catches exact tokens (product codes, error strings, rare names) that embeddings miss.
+
+```kotlin
+val index = HybridIndex<String>(dimensions = 384)
+
+index.add("doc-1", embed("Kotlin coroutines guide"), "Kotlin coroutines guide")
+index.add("doc-2", embed("Sourdough starter troubleshooting"), "Sourdough starter troubleshooting")
+
+// fuses semantic similarity (vector) with keyword match (text)
+val hits = index.search(vector = embed("async programming"), text = "coroutines", k = 10)
+
+// or query a single modality
+index.searchText("coroutines", k = 10)
+index.searchVector(embed("async programming"), k = 10)
+```
+
 ## Design principles
 
 - **Zero dependencies** in the vector layer. HNSW is arithmetic over `FloatArray` and graph
@@ -81,12 +103,12 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 
 ## Roadmap
 
-1. **v0 — vector layer** ✅ HNSW ANN index, cosine / dot / euclidean, in-memory.
-2. **v1 — persistence & quantization.** Serializable index; int8/binary quantization to fit larger
-   corpora on-device. Optional integration with [kemus](https://github.com/kemus/kemus) as the store.
-3. **v1 — full-text layer.** Inverted index + BM25, pluggable analyzers (tokenization, stemming,
-   CJK n-grams).
-4. **v2 — hybrid.** RRF fusion of vector + full-text, metadata filters.
+1. **Vector layer** ✅ HNSW ANN index, cosine / dot / euclidean, in-memory.
+2. **Full-text layer** ✅ Inverted index + BM25, pluggable analyzers.
+3. **Hybrid** ✅ RRF fusion of vector + full-text (`HybridIndex`).
+4. **Persistence & quantization** *(next)* — serializable index; int8/binary quantization to fit
+   larger corpora on-device. Optional integration with [kemus](https://github.com/kemus/kemus) as the store.
+5. **Later** — metadata filters on queries; richer analyzers (stemming, CJK n-grams).
 
 ## License
 
