@@ -23,17 +23,31 @@ package io.github.kromus
  *
  * @property rrfK fusion constant passed to [Rrf.fuse].
  */
-public class HybridIndex<K>(
+public class HybridIndex<K> private constructor(
     public val dimensions: Int,
-    public val metric: Metric = Metric.Cosine,
-    public val hnswConfig: HnswConfig = HnswConfig(),
-    public val analyzer: Analyzer = Analyzer.standard(),
-    public val bm25Config: Bm25Config = Bm25Config(),
-    public val rrfK: Int = Rrf.DEFAULT_K,
+    public val metric: Metric,
+    public val hnswConfig: HnswConfig,
+    public val analyzer: Analyzer,
+    public val bm25Config: Bm25Config,
+    public val rrfK: Int,
+    private val vectorIndex: VectorIndex<K>,
+    private val textIndex: TextIndex<K>,
+    initialKeys: Set<K>,
 ) {
-    private val vectorIndex = VectorIndex<K>(dimensions, metric, hnswConfig)
-    private val textIndex = TextIndex<K>(analyzer, bm25Config)
-    private val keys = HashSet<K>()
+    /** Creates an empty hybrid index. */
+    public constructor(
+        dimensions: Int,
+        metric: Metric = Metric.Cosine,
+        hnswConfig: HnswConfig = HnswConfig(),
+        analyzer: Analyzer = Analyzer.standard(),
+        bm25Config: Bm25Config = Bm25Config(),
+        rrfK: Int = Rrf.DEFAULT_K,
+    ) : this(
+        dimensions, metric, hnswConfig, analyzer, bm25Config, rrfK,
+        VectorIndex(dimensions, metric, hnswConfig), TextIndex(analyzer, bm25Config), emptySet(),
+    )
+
+    private val keys = HashSet<K>(initialKeys)
 
     /** Number of live entries. */
     public val size: Int get() = keys.size
@@ -82,4 +96,26 @@ public class HybridIndex<K>(
     /** Text-only (BM25) retrieval, bypassing fusion. */
     public fun searchText(text: String, k: Int): List<SearchResult<K>> =
         textIndex.search(text, k)
+
+    // --- persistence support (accessed by Persistence.kt) ---
+
+    internal fun vectorPart(): VectorIndex<K> = vectorIndex
+
+    internal fun textPart(): TextIndex<K> = textIndex
+
+    internal companion object {
+        fun <K> fromParts(
+            dimensions: Int,
+            metric: Metric,
+            hnswConfig: HnswConfig,
+            analyzer: Analyzer,
+            bm25Config: Bm25Config,
+            rrfK: Int,
+            vectorIndex: VectorIndex<K>,
+            textIndex: TextIndex<K>,
+        ): HybridIndex<K> = HybridIndex(
+            dimensions, metric, hnswConfig, analyzer, bm25Config, rrfK,
+            vectorIndex, textIndex, vectorIndex.liveEntries().keys.toHashSet(),
+        )
+    }
 }

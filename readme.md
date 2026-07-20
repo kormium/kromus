@@ -15,8 +15,8 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.2.0`, pre-1.0. All three layers are usable today; the API may still change before 1.0.
-> Persistence and quantization are next — see the roadmap.
+> **Status:** `0.3.0`, pre-1.0. All three layers plus binary persistence are usable today; the API
+> may still change before 1.0. Quantization is next — see the roadmap.
 
 ## Why it exists
 
@@ -40,7 +40,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.2.0")
+        implementation("io.github.kormium:kromus-core:0.3.0")
     }
 }
 ```
@@ -87,6 +87,17 @@ index.searchText("coroutines", k = 10)
 index.searchVector(embed("async programming"), k = 10)
 ```
 
+### Persistence
+
+Building an HNSW graph is expensive; persist a prebuilt index and reload it instantly (ship it with
+your app, or cache it on device). The format is a compact, dependency-free binary that is identical
+across platforms. Analyzers are functions and are not serialized — pass the same one when reloading.
+
+```kotlin
+val bytes: ByteArray = index.encodeToByteArray(KeyCodec.string)
+val reloaded = decodeHybridIndex(bytes, KeyCodec.string)      // or decodeVectorIndex / decodeTextIndex
+```
+
 ## Design principles
 
 - **Zero dependencies** in the vector layer. HNSW is arithmetic over `FloatArray` and graph
@@ -106,9 +117,10 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 1. **Vector layer** ✅ HNSW ANN index, cosine / dot / euclidean, in-memory.
 2. **Full-text layer** ✅ Inverted index + BM25, pluggable analyzers.
 3. **Hybrid** ✅ RRF fusion of vector + full-text (`HybridIndex`).
-4. **Persistence & quantization** *(next)* — serializable index; int8/binary quantization to fit
-   larger corpora on-device. Optional integration with [kemus](https://github.com/kemus/kemus) as the store.
-5. **Later** — metadata filters on queries; richer analyzers (stemming, CJK n-grams).
+4. **Persistence** ✅ Compact, cross-platform binary encode/decode for all three indexes.
+5. **Quantization** *(next)* — int8/binary vector quantization to fit larger corpora on-device.
+   Optional integration with [kemus](https://github.com/kemus/kemus) as the store.
+6. **Later** — metadata filters on queries; richer analyzers (stemming, CJK n-grams).
 
 ## License
 

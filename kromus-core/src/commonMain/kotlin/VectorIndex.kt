@@ -25,16 +25,22 @@ package io.github.kromus
  * @property metric distance/similarity measure; see [Metric].
  * @property config HNSW tuning; see [HnswConfig].
  */
-public class VectorIndex<K>(
+public class VectorIndex<K> private constructor(
     public val dimensions: Int,
-    public val metric: Metric = Metric.Cosine,
-    public val config: HnswConfig = HnswConfig(),
+    public val metric: Metric,
+    public val config: HnswConfig,
+    private val hnsw: Hnsw,
 ) {
+    /** Creates an empty index. */
+    public constructor(
+        dimensions: Int,
+        metric: Metric = Metric.Cosine,
+        config: HnswConfig = HnswConfig(),
+    ) : this(dimensions, metric, config, Hnsw(dimensions, metric, config))
+
     init {
         require(dimensions >= 1) { "dimensions must be >= 1, was $dimensions" }
     }
-
-    private val hnsw = Hnsw(dimensions, metric, config)
 
     // Bidirectional key <-> internal-id mapping. keyOf is id-indexed and grows once per HNSW insert
     // (ids are never reused); a removed or replaced slot is nulled out.
@@ -99,6 +105,33 @@ public class VectorIndex<K>(
         require(k >= 1) { "k must be >= 1, was $k" }
         return hnsw.query(query, k, efSearch).mapNotNull { (id, score) ->
             keyOf[id]?.let { SearchResult(it, score) }
+        }
+    }
+
+    // --- persistence support (accessed by the encode/decode functions in Persistence.kt) ---
+
+    internal fun graph(): Hnsw = hnsw
+
+    /** Live key -> internal id, in iteration order. */
+    internal fun liveEntries(): Map<K, Int> = idOf
+
+    internal companion object {
+        /** Rebuilds an index from a restored graph and its live key mapping. */
+        fun <K> fromState(
+            dimensions: Int,
+            metric: Metric,
+            config: HnswConfig,
+            hnsw: Hnsw,
+            liveKeys: Map<K, Int>,
+            capacity: Int,
+        ): VectorIndex<K> {
+            val index = VectorIndex<K>(dimensions, metric, config, hnsw)
+            repeat(capacity) { index.keyOf.add(null) }
+            for ((key, id) in liveKeys) {
+                index.idOf[key] = id
+                index.keyOf[id] = key
+            }
+            return index
         }
     }
 }

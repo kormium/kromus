@@ -98,4 +98,19 @@ public class TextIndex<K>(
             .take(k)
             .map { SearchResult(it.key, it.value.toFloat()) }
     }
+
+    // --- persistence support (accessed by Persistence.kt) ---
+
+    /** (key, term frequencies, document length) for every indexed document. */
+    internal fun snapshot(): List<Triple<K, Map<String, Int>, Int>> =
+        docs.map { (key, doc) -> Triple(key, doc.termFreqs, doc.length) }
+
+    /** Reinserts a pre-tokenized document, rebuilding postings without re-running the analyzer. */
+    internal fun loadDoc(key: K, termFreqs: Map<String, Int>, length: Int) {
+        docs[key] = Doc(termFreqs, length)
+        totalLength += length
+        for ((term, f) in termFreqs) {
+            postings.getOrPut(term) { HashMap() }[key] = f
+        }
+    }
 }

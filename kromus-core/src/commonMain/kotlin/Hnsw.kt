@@ -266,4 +266,42 @@ internal class Hnsw(
             Metric.Cosine -> 1f - distance
             Metric.DotProduct, Metric.Euclidean -> -distance
         }
+
+    // --- persistence support (read side) ---
+    // Stored vectors are already prepared (normalized for Cosine); a save/load round trip keeps them
+    // as-is, which is exactly what restore() expects.
+
+    val entryPointValue: Int get() = entryPoint
+    val topLayerValue: Int get() = topLayer
+
+    fun levelAt(id: Int): Int = levels[id]
+    fun vectorAt(id: Int): FloatArray = vectors[id]
+    fun deletedAt(id: Int): Boolean = deleted[id]
+    fun neighborsAtLayer(id: Int, layer: Int): List<Int> = neighbors[id][layer]
+
+    internal companion object {
+        /** Rebuilds a graph directly from previously exported state, bypassing insertion. */
+        fun restore(
+            dimensions: Int,
+            metric: Metric,
+            config: HnswConfig,
+            vectors: List<FloatArray>,
+            levels: IntArray,
+            neighbors: List<Array<IntArray>>,
+            deleted: BooleanArray,
+            entryPoint: Int,
+            topLayer: Int,
+        ): Hnsw {
+            val h = Hnsw(dimensions, metric, config)
+            for (id in vectors.indices) {
+                h.vectors.add(vectors[id])
+                h.levels.add(levels[id])
+                h.deleted.add(deleted[id])
+                h.neighbors.add(Array(neighbors[id].size) { neighbors[id][it].toMutableList() })
+            }
+            h.entryPoint = entryPoint
+            h.topLayer = topLayer
+            return h
+        }
+    }
 }
