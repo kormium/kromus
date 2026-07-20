@@ -15,8 +15,9 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.6.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization and
-> metadata filters are usable today; the API may still change before 1.0. See the roadmap for next.
+> **Status:** `0.7.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> metadata filters and pluggable analyzers (stemming, stop-words, CJK n-grams) are usable today; the
+> API may still change before 1.0. See the roadmap for what's next.
 
 ## Why it exists
 
@@ -40,7 +41,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.6.0")
+        implementation("io.github.kormium:kromus-core:0.7.0")
     }
 }
 ```
@@ -89,6 +90,10 @@ index.search(query, k = 10) { it["type"] == "doc" && it["lang"] == "en" }
 their rankings with RRF — the recommended default, because vector search captures meaning while BM25
 catches exact tokens (product codes, error strings, rare names) that embeddings miss.
 
+The tokenizer is pluggable via `Analyzer`: `Analyzer.standard(stopwords = Stopwords.english, stemmer
+= Stemmer.englishLight())` for Latin scripts, or `Analyzer.ngram(2)` for boundary-free languages
+(CJK) and substring matching. Use the same analyzer for indexing and querying.
+
 ```kotlin
 val index = HybridIndex<String>(dimensions = 384)
 
@@ -136,8 +141,9 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 4. **Persistence** ✅ Compact, cross-platform binary encode/decode for all three indexes.
 5. **Quantization** ✅ int8 (~4×) and binary (~32×) quantization, asymmetric full-precision queries.
 6. **Metadata filters** ✅ string attributes + `MetadataFilter`, applied mid-traversal for vectors.
-7. **Next** — richer analyzers (stemming, CJK n-grams); optional
-   [kemus](https://github.com/kemus/kemus)-backed storage.
+7. **Analyzers** ✅ pluggable tokenizer: stemming, stop-words, CJK/substring n-grams.
+8. **Next** — optional [kemus](https://github.com/kemus/kemus)-backed storage; full-precision re-rank
+   helper for binary quantization.
 
 ## License
 
