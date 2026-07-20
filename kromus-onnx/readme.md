@@ -16,10 +16,10 @@ its token embeddings. So adding a platform means writing one small backend, not 
 TextEmbedder            ← what your app calls (common)
  └ OnnxTextEmbedder      ← tokenize · pool · normalize (common, tested on JVM/JS/Wasm/Native)
      └ OnnxSession       ← the model runtime (per platform)
-         ├ JVM   → ONNX Runtime for Java        ✅ shipped
-         ├ Web   → onnxruntime-web / Transformers.js   (drop-in, below)
-         ├ iOS / native → ONNX Runtime C API via cinterop   (planned)
-         └ Android → onnxruntime-android         (planned)
+         ├ JVM   → ONNX Runtime for Java              ✅ shipped
+         ├ Web   → onnxruntime-web (Kotlin/JS + Wasm) ✅ shipped
+         ├ iOS / native → ONNX Runtime C API (cinterop)   (planned)
+         └ Android → onnxruntime-android                  (planned)
 ```
 
 ## JVM (shipped)
@@ -36,30 +36,30 @@ Get a model and its `vocab.txt` from Hugging Face — e.g. `Xenova/all-MiniLM-L6
 mean-pooling), or export any sentence-transformer with `optimum-cli export onnx`. See the main
 [Embeddings](../readme.md#embeddings) section.
 
-## Web (Kotlin/JS & Kotlin/Wasm) — drop-in
+## Web (Kotlin/JS & Kotlin/Wasm) — shipped
 
 The web platform runs embeddings via [onnxruntime-web](https://onnxruntime.ai/docs/tutorials/web/)
-(WASM, optionally WebGPU). Implement the same `OnnxSession` over its JS API and everything above it is
-unchanged:
+(WASM, optionally WebGPU). `WebOnnxSession` is shipped for both **Kotlin/JS** and **Kotlin/Wasm** — you
+create the `ort.InferenceSession` in your app (adding `implementation(npm("onnxruntime-web", "1.20.1"))`)
+and hand it in; the tokenizer and pooling are the same shared common code.
 
 ```kotlin
-// jsMain — sketch; add: implementation(npm("onnxruntime-web", "1.20.1"))
-external interface OrtTensor { val data: Float32Array; val dims: IntArray }
-external interface OrtSession { fun run(feeds: dynamic): Promise<dynamic> }
-
-class WebOnnxSession(private val session: OrtSession) : OnnxSession {
-    override suspend fun run(inputIds: IntArray, attentionMask: IntArray, tokenTypeIds: IntArray): OnnxOutput {
-        val seq = inputIds.size
-        fun i64(a: IntArray) = ort.Tensor("int64", BigInt64Array(a.map { it.toLong() }), arrayOf(1, seq))
-        val out = session.run(json("input_ids" to i64(inputIds), "attention_mask" to i64(attentionMask))).await()
-        val t = out.last_hidden_state.unsafeCast<OrtTensor>()
-        return OnnxOutput(FloatArray(t.data.length) { t.data[it] }, seq, t.dims[2])
-    }
-}
+// Kotlin/JS — app has `ort` in scope
+val ortSession = ort.InferenceSession.create("all-MiniLM-L6-v2.onnx").await()
+val session = WebOnnxSession(
+    session = ortSession,
+    createInt64Tensor = { values, dims ->
+        val data = js("BigInt64Array.from(values, function (v) { return BigInt(v); })")
+        js("new ort.Tensor('int64', data, dims)")
+    },
+)
+val embedder = OnnxTextEmbedder(session, tokenizer, dimensions = 384)
+val vector = embedder.embed("async programming")
 ```
 
-The Kotlin/Wasm backend is the same idea through Wasm↔JS interop. Because the tokenizer and pooling are
-common, only this `OnnxSession` differs — and it's already validated by the shared tests on JS and Wasm.
+Kotlin/Wasm is the same `WebOnnxSession(ortSession)` through typed Wasm↔JS interop. Both compile as part
+of the build; run them in your app against a real model (this repo verifies the shared tokenizer +
+pipeline on JS and Wasm, not a full in-browser inference).
 
 ## Asymmetric models (E5, etc.)
 
@@ -72,9 +72,9 @@ embedder.embedDocument("Kotlin coroutines guide") // passage: …
 
 ## Status
 
-Pre-1.0, part of the kromus suite. Shared layer runs on every target today; the JVM ONNX backend
-ships; web / iOS / Android / native backends implement the documented `OnnxSession`. Not yet published
-to Maven Central.
+Pre-1.0, part of the kromus suite. Shared layer runs on every target today; the JVM and web (Kotlin/JS
++ Wasm) `OnnxSession` backends ship; iOS / Android / desktop-native backends are next. Not yet
+published to Maven Central.
 
 ## License
 
