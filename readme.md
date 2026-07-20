@@ -15,8 +15,8 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.3.0`, pre-1.0. All three layers plus binary persistence are usable today; the API
-> may still change before 1.0. Quantization is next — see the roadmap.
+> **Status:** `0.4.0`, pre-1.0. All three layers, binary persistence and int8 quantization are
+> usable today; the API may still change before 1.0. See the roadmap for what's next.
 
 ## Why it exists
 
@@ -40,7 +40,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.3.0")
+        implementation("io.github.kormium:kromus-core:0.4.0")
     }
 }
 ```
@@ -66,6 +66,12 @@ val hits: List<SearchResult<String>> = index.search(embed("async programming"), 
 
 Re-adding a key replaces its vector; `remove(key)` drops it from results. See the KDoc on
 `VectorIndex`, `HnswConfig` and `Metric` for tuning.
+
+To cut memory ~4× on device, store vectors quantized — queries still run at full precision:
+
+```kotlin
+val index = VectorIndex<String>(384, config = HnswConfig(quantization = Quantization.Int8))
+```
 
 ### Full-text and hybrid
 
@@ -118,9 +124,9 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 2. **Full-text layer** ✅ Inverted index + BM25, pluggable analyzers.
 3. **Hybrid** ✅ RRF fusion of vector + full-text (`HybridIndex`).
 4. **Persistence** ✅ Compact, cross-platform binary encode/decode for all three indexes.
-5. **Quantization** *(next)* — int8/binary vector quantization to fit larger corpora on-device.
-   Optional integration with [kemus](https://github.com/kemus/kemus) as the store.
-6. **Later** — metadata filters on queries; richer analyzers (stemming, CJK n-grams).
+5. **Quantization** ✅ int8 scalar quantization (~4× smaller), asymmetric full-precision queries.
+6. **Next** — metadata filters on queries; binary (1-bit) quantization; richer analyzers (stemming,
+   CJK n-grams); optional [kemus](https://github.com/kemus/kemus)-backed storage.
 
 ## License
 

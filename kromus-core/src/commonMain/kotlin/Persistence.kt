@@ -6,13 +6,14 @@ package io.github.kromus
 // bits). Analyzers are functions and cannot be serialized, so text/hybrid loaders take the analyzer
 // the index was built with — supply the same one for consistent query tokenization.
 
-private const val VECTOR_FORMAT: Int = 1
+private const val VECTOR_FORMAT: Int = 2
 private const val TEXT_FORMAT: Int = 1
 private const val HYBRID_FORMAT: Int = 1
 
 /** Serializes this vector index (graph + key mapping) to a byte array. */
 public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
     val g = graph()
+    val store = g.store()
     val w = ByteWriter()
     w.byte(VECTOR_FORMAT)
     w.int(dimensions)
@@ -21,13 +22,21 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
     w.int(config.efConstruction)
     w.int(config.efSearch)
     w.long(config.seed)
+    w.byte(config.quantization.ordinal)
 
     val n = g.capacity
     w.int(n)
     for (id in 0 until n) {
         val level = g.levelAt(id)
         w.int(level)
-        for (x in g.vectorAt(id)) w.float(x)
+        when (store) {
+            is Float32VectorStore -> for (x in store.vectorAt(id)) w.float(x)
+            is Int8VectorStore -> {
+                for (b in store.codeAt(id)) w.byte(b.toInt())
+                w.float(store.scaleAt(id))
+            }
+            else -> error("unknown vector store")
+        }
         w.byte(if (g.deletedAt(id)) 1 else 0)
         for (layer in 0..level) {
             val neighbors = g.neighborsAtLayer(id, layer)
@@ -53,19 +62,22 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
     require(r.byte() == VECTOR_FORMAT) { "unsupported vector index format" }
     val dimensions = r.int()
     val metric = Metric.entries[r.byte()]
-    val config = HnswConfig(r.int(), r.int(), r.int(), r.long())
+    val config = HnswConfig(r.int(), r.int(), r.int(), r.long(), Quantization.entries[r.byte()])
 
+    val store = Hnsw.newStore(dimensions, metric, config.quantization)
     val n = r.int()
-    val vectors = ArrayList<FloatArray>(n)
     val levels = IntArray(n)
     val deleted = BooleanArray(n)
     val neighbors = ArrayList<Array<IntArray>>(n)
     for (id in 0 until n) {
-        val level = r.int()
-        levels[id] = level
-        vectors.add(FloatArray(dimensions) { r.float() })
+        levels[id] = r.int()
+        when (store) {
+            is Float32VectorStore -> store.load(FloatArray(dimensions) { r.float() })
+            is Int8VectorStore -> store.load(ByteArray(dimensions) { r.byte().toByte() }, r.float())
+            else -> error("unknown vector store")
+        }
         deleted[id] = r.byte() == 1
-        neighbors.add(Array(level + 1) { IntArray(r.int()) { r.int() } })
+        neighbors.add(Array(levels[id] + 1) { IntArray(r.int()) { r.int() } })
     }
     val entryPoint = r.int()
     val topLayer = r.int()
@@ -77,7 +89,7 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
         live[key] = r.int()
     }
 
-    val hnsw = Hnsw.restore(dimensions, metric, config, vectors, levels, neighbors, deleted, entryPoint, topLayer)
+    val hnsw = Hnsw.restore(metric, config, store, levels, neighbors, deleted, entryPoint, topLayer)
     return VectorIndex.fromState(dimensions, metric, config, hnsw, live, n)
 }
 

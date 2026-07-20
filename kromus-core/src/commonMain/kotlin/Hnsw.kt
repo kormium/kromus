@@ -6,24 +6,25 @@ import kotlin.random.Random
 
 /**
  * A Hierarchical Navigable Small World graph over a growing set of vectors — the approximate
- * nearest-neighbour index behind [VectorIndex].
+ * nearest-neighbour index behind [VectorIndex]. Vector storage and distance computation are delegated
+ * to a [VectorStore] (full-precision or quantized); this class owns only the graph.
  *
  * Vectors are addressed by a dense, monotonically increasing internal id (their insertion order).
  * Ids are never reused: a "removed" vector is only flagged [deleted] so it stops appearing in
- * results while still serving as a routing hop, which keeps the graph connected. Callers map their
- * own keys onto these ids ([VectorIndex] does exactly that).
+ * results while still serving as a routing hop, which keeps the graph connected.
  *
  * Not thread-safe: build and query under a single writer (or external synchronization).
  */
-internal class Hnsw(
-    private val dimensions: Int,
+internal class Hnsw private constructor(
     private val metric: Metric,
     private val config: HnswConfig,
+    private val store: VectorStore,
 ) {
-    // Parallel, id-indexed columns. vectors[id] is stored pre-normalized for Cosine so a plain dot
-    // product yields cosine similarity; levels[id] is the node's top layer; neighbors[id][layer] is
-    // its adjacency list on that layer (present only for layer <= levels[id]).
-    private val vectors = ArrayList<FloatArray>()
+    constructor(dimensions: Int, metric: Metric, config: HnswConfig) :
+        this(metric, config, newStore(dimensions, metric, config.quantization))
+
+    // Id-indexed graph columns (parallel to the store). levels[id] is the node's top layer;
+    // neighbors[id][layer] its adjacency list on that layer (present only for layer <= levels[id]).
     private val levels = ArrayList<Int>()
     private val neighbors = ArrayList<Array<MutableList<Int>>>()
     private val deleted = ArrayList<Boolean>()
@@ -35,19 +36,18 @@ internal class Hnsw(
     private val levelMultiplier = 1.0 / ln(config.m.toDouble())
 
     /** Number of vectors ever inserted, including flagged-deleted ones (== the id space size). */
-    val capacity: Int get() = vectors.size
+    val capacity: Int get() = store.size
 
     fun markDeleted(id: Int) {
         deleted[id] = true
     }
 
-    /** Inserts [rawVector] and returns its internal id. The array is copied; the caller keeps ownership. */
+    /** Inserts [rawVector] and returns its internal id. */
     fun add(rawVector: FloatArray): Int {
-        val v = prepare(rawVector)
-        val id = vectors.size
+        val prepared = prepare(rawVector)
+        val id = store.add(prepared)
         val level = randomLevel()
 
-        vectors.add(v)
         levels.add(level)
         neighbors.add(Array(level + 1) { mutableListOf() })
         deleted.add(false)
@@ -60,10 +60,10 @@ internal class Hnsw(
 
         // Greedy descent through the layers above the new node's top level (ef = 1).
         var curr = entryPoint
-        var currDist = distance(v, curr)
+        var currDist = store.distanceToQuery(prepared, curr)
         var lc = topLayer
         while (lc > level) {
-            curr = greedyClosest(v, curr, currDist, lc).also { currDist = distance(v, it) }
+            curr = greedyClosest(prepared, curr, currDist, lc).also { currDist = store.distanceToQuery(prepared, it) }
             lc--
         }
 
@@ -71,8 +71,8 @@ internal class Hnsw(
         var entryPoints = intArrayOf(curr)
         lc = if (level < topLayer) level else topLayer
         while (lc >= 0) {
-            val candidates = searchLayer(v, entryPoints, config.efConstruction, lc)
-            val selected = selectNeighbors(v, candidates, config.m)
+            val candidates = searchLayer(prepared, entryPoints, config.efConstruction, lc)
+            val selected = selectNeighbors(id, candidates, config.m)
             val mMax = if (lc == 0) config.maxM0 else config.m
 
             val own = neighbors[id][lc]
@@ -81,7 +81,7 @@ internal class Hnsw(
                 val other = neighbors[e][lc]
                 other.add(id)
                 if (other.size > mMax) {
-                    val kept = selectNeighbors(vectors[e], other.toIntArray(), mMax)
+                    val kept = selectNeighbors(e, other.toIntArray(), mMax)
                     other.clear()
                     for (k in kept) other.add(k)
                 }
@@ -106,10 +106,10 @@ internal class Hnsw(
         val q = prepare(rawVector)
 
         var curr = entryPoint
-        var currDist = distance(q, curr)
+        var currDist = store.distanceToQuery(q, curr)
         var lc = topLayer
         while (lc > 0) {
-            curr = greedyClosest(q, curr, currDist, lc).also { currDist = distance(q, it) }
+            curr = greedyClosest(q, curr, currDist, lc).also { currDist = store.distanceToQuery(q, it) }
             lc--
         }
 
@@ -118,21 +118,21 @@ internal class Hnsw(
         val out = ArrayList<Pair<Int, Float>>(k)
         for (id in found) {
             if (deleted[id]) continue
-            out.add(id to similarityOf(distance(q, id)))
+            out.add(id to similarityOf(store.distanceToQuery(q, id)))
             if (out.size >= k) break
         }
         return out
     }
 
     /** Walks greedily to the closest node reachable from [start] on [layer] (hill climbing, ef = 1). */
-    private fun greedyClosest(q: FloatArray, start: Int, startDist: Float, layer: Int): Int {
+    private fun greedyClosest(query: FloatArray, start: Int, startDist: Float, layer: Int): Int {
         var curr = start
         var currDist = startDist
         var improved = true
         while (improved) {
             improved = false
             for (n in neighborsAt(curr, layer)) {
-                val d = distance(q, n)
+                val d = store.distanceToQuery(query, n)
                 if (d < currDist) {
                     currDist = d
                     curr = n
@@ -145,16 +145,16 @@ internal class Hnsw(
 
     /**
      * Best-first search on a single [layer]: expands the frontier from [entryPoints] until it can no
-     * longer improve the [ef] closest found. Returns those ids sorted ascending by distance to [q].
+     * longer improve the [ef] closest found. Returns those ids sorted ascending by distance to [query].
      */
-    private fun searchLayer(q: FloatArray, entryPoints: IntArray, ef: Int, layer: Int): IntArray {
+    private fun searchLayer(query: FloatArray, entryPoints: IntArray, ef: Int, layer: Int): IntArray {
         val visited = HashSet<Int>()
         val frontier = FloatHeap(minHeap = true)
         val best = FloatHeap(minHeap = false)
 
         for (ep in entryPoints) {
             if (!visited.add(ep)) continue
-            val d = distance(q, ep)
+            val d = store.distanceToQuery(query, ep)
             frontier.push(ep, d)
             best.push(ep, d)
         }
@@ -165,7 +165,7 @@ internal class Hnsw(
             if (best.size >= ef && cDist > best.peekKey()) break
             for (e in neighborsAt(c, layer)) {
                 if (!visited.add(e)) continue
-                val d = distance(q, e)
+                val d = store.distanceToQuery(query, e)
                 if (best.size < ef || d < best.peekKey()) {
                     frontier.push(e, d)
                     best.push(e, d)
@@ -174,7 +174,6 @@ internal class Hnsw(
             }
         }
 
-        // best is a max-heap; drain it and reverse so the result is closest-first.
         val out = IntArray(best.size)
         var i = out.size - 1
         while (!best.isEmpty()) out[i--] = best.pop()
@@ -183,14 +182,14 @@ internal class Hnsw(
 
     /**
      * Neighbour selection heuristic (Malkov & Yashunin, Algorithm 4): prefer diverse links by keeping
-     * a candidate only when it is closer to [base] than to any already-chosen neighbour. Falls back to
-     * nearest-remaining to reach [m] so connectivity is never starved. [candidateIds] may be unsorted.
+     * a candidate only when it is closer to [baseId] than to any already-chosen neighbour. Falls back
+     * to nearest-remaining to reach [m] so connectivity is never starved. Operates entirely on stored
+     * vectors via [VectorStore.distanceBetween].
      */
-    private fun selectNeighbors(base: FloatArray, candidateIds: IntArray, m: Int): IntArray {
+    private fun selectNeighbors(baseId: Int, candidateIds: IntArray, m: Int): IntArray {
         if (candidateIds.size <= m) return candidateIds
 
-        // Sort candidates ascending by distance to base.
-        val dists = FloatArray(candidateIds.size) { distance(base, candidateIds[it]) }
+        val dists = FloatArray(candidateIds.size) { store.distanceBetween(baseId, candidateIds[it]) }
         val order = candidateIds.indices.sortedBy { dists[it] }
 
         val chosen = ArrayList<Int>(m)
@@ -200,7 +199,7 @@ internal class Hnsw(
             val dBaseCand = dists[idx]
             var keep = true
             for (r in chosen) {
-                if (distance(vectors[cand], r) < dBaseCand) {
+                if (store.distanceBetween(cand, r) < dBaseCand) {
                     keep = false
                     break
                 }
@@ -236,31 +235,6 @@ internal class Hnsw(
         return FloatArray(vector.size) { vector[it] * inv }
     }
 
-    /** Distance from a prepared query [q] to the stored vector [id]. Smaller = closer. */
-    private fun distance(q: FloatArray, id: Int): Float = distance(q, vectors[id])
-
-    private fun distance(a: FloatArray, b: FloatArray): Float =
-        when (metric) {
-            Metric.Cosine -> {
-                var dot = 0f
-                for (i in a.indices) dot += a[i] * b[i]
-                1f - dot
-            }
-            Metric.DotProduct -> {
-                var dot = 0f
-                for (i in a.indices) dot += a[i] * b[i]
-                -dot
-            }
-            Metric.Euclidean -> {
-                var s = 0f
-                for (i in a.indices) {
-                    val d = a[i] - b[i]
-                    s += d * d
-                }
-                sqrt(s)
-            }
-        }
-
     private fun similarityOf(distance: Float): Float =
         when (metric) {
             Metric.Cosine -> 1f - distance
@@ -268,33 +242,35 @@ internal class Hnsw(
         }
 
     // --- persistence support (read side) ---
-    // Stored vectors are already prepared (normalized for Cosine); a save/load round trip keeps them
-    // as-is, which is exactly what restore() expects.
 
     val entryPointValue: Int get() = entryPoint
     val topLayerValue: Int get() = topLayer
 
     fun levelAt(id: Int): Int = levels[id]
-    fun vectorAt(id: Int): FloatArray = vectors[id]
     fun deletedAt(id: Int): Boolean = deleted[id]
     fun neighborsAtLayer(id: Int, layer: Int): List<Int> = neighbors[id][layer]
+    fun store(): VectorStore = store
 
     internal companion object {
-        /** Rebuilds a graph directly from previously exported state, bypassing insertion. */
+        fun newStore(dimensions: Int, metric: Metric, quantization: Quantization): VectorStore =
+            when (quantization) {
+                Quantization.None -> Float32VectorStore(dimensions, metric)
+                Quantization.Int8 -> Int8VectorStore(dimensions, metric)
+            }
+
+        /** Rebuilds a graph over an already-populated [store], bypassing insertion. */
         fun restore(
-            dimensions: Int,
             metric: Metric,
             config: HnswConfig,
-            vectors: List<FloatArray>,
+            store: VectorStore,
             levels: IntArray,
             neighbors: List<Array<IntArray>>,
             deleted: BooleanArray,
             entryPoint: Int,
             topLayer: Int,
         ): Hnsw {
-            val h = Hnsw(dimensions, metric, config)
-            for (id in vectors.indices) {
-                h.vectors.add(vectors[id])
+            val h = Hnsw(metric, config, store)
+            for (id in 0 until store.size) {
                 h.levels.add(levels[id])
                 h.deleted.add(deleted[id])
                 h.neighbors.add(Array(neighbors[id].size) { neighbors[id][it].toMutableList() })
