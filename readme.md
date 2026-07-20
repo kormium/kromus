@@ -15,10 +15,10 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.9.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
-> metadata filters, pluggable analyzers (stemming, stop-words, CJK n-grams), full-precision re-rank
-> and an optional kemus storage adapter are usable today; the API may still change before 1.0. See
-> the roadmap for what's next.
+> **Status:** `0.10.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> metadata filters, pluggable analyzers, full-precision re-rank, an optional kemus storage adapter and
+> an optional `kromus-onnx` embedder are usable today; the API may still change before 1.0. See the
+> roadmap for what's next.
 
 ## Why it exists
 
@@ -42,7 +42,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.9.0")
+        implementation("io.github.kormium:kromus-core:0.10.0")
     }
 }
 ```
@@ -187,9 +187,16 @@ Where the vectors typically come from:
 **Contract:** every vector in one index must have the same `dimensions` and come from the *same*
 model — store the model id/version next to the index so you never mix embeddings from different models.
 
-**Batteries-included?** The core stays model-free on purpose. A convenience embedder is planned as an
-*optional* adapter module (e.g. `kromus-onnx`) so you can opt into a ready-to-run setup without
-weighing down the zero-dependency core — see the roadmap.
+**Batteries-included?** The core stays model-free on purpose — but the optional
+[`kromus-onnx`](kromus-onnx/) module is the ready-to-run path. Its `TextEmbedder` pipeline (WordPiece
+tokenizer → model → pooling → normalization) is shared common code on **every** target, including the
+web; only the model runtime is per-platform (JVM backend ships today, web/iOS/Android/native plug into
+the same `OnnxSession`).
+
+```kotlin
+val embedder = OnnxTextEmbedder(OrtOnnxSession(modelBytes), tokenizer, dimensions = 384)
+index.add("doc-1", embedder.embed("Kotlin coroutines guide"))
+```
 
 ## Design principles
 
@@ -217,8 +224,9 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 8. **kemus storage** ✅ optional `kromus-kemus` adapter — persist an index into a
    [kemus](https://github.com/kormium/kemus) store (embedded / offline→online sync).
 9. **Re-rank** ✅ `rerank(query, candidates, k) { fullVector }` — two-phase search for quantized indexes.
-10. **Next** — optional `kromus-onnx` embedder adapter (batteries-included, ONNX Runtime); publish
-    `kromus-kemus` once kemus is on Maven Central; more built-in analyzers.
+10. **Embeddings** ✅ optional [`kromus-onnx`](kromus-onnx/) — a `TextEmbedder` whose pipeline is shared
+    on every target; JVM ONNX backend ships, web/iOS/Android/native plug into one `OnnxSession`.
+11. **Next** — web/iOS `OnnxSession` backends; publish `kromus-kemus`/`kromus-onnx` to Maven Central.
 
 ## License
 

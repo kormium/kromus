@@ -16,6 +16,10 @@ rootProject.name = "kromus"
 // BM25 full-text + RRF hybrid, quantization, metadata filters, binary persistence. Zero deps.
 include("kromus-core")
 
+// kromus-onnx — optional text embedder. The pipeline (tokenizer, pooling, normalization) is shared
+// common code on every target; the model runtime is per-platform (JVM backend ships, others plug in).
+include("kromus-onnx")
+
 // kromus-kemus — optional adapter that persists an index into a kemus store (embedded / offline /
 // online sync). It depends on io.github.kemus:kemus-core, which is not yet on Maven Central, so it
 // is only wired in when the sibling checkout is present next to this repo: a plain clone (and CI)
