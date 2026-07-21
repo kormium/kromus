@@ -17,12 +17,32 @@ buildscript {
 plugins {
     // Applied to the publishable library subprojects below (not to the root itself).
     id("com.vanniktech.maven.publish") version "0.36.0" apply false
+    // Locks the public ABI of the stable core (JVM + klib). Changes require `./gradlew apiDump`
+    // and a review of the .api diffs.
+    id("org.jetbrains.kotlinx.binary-compatibility-validator") version "0.18.1"
+}
+
+apiValidation {
+    @OptIn(kotlinx.validation.ExperimentalBCVApi::class)
+    klib {
+        enabled = true
+    }
+    // Only kromus-core is API-locked for now: the adapter modules (onnx/kemus) are pre-1.0 and their
+    // surfaces still move. `benchmarks`/samples would go here too if added.
+    ignoredProjects.addAll(listOf("kromus-onnx", "kromus-kemus"))
 }
 
 allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+    // BCV's klib ABI check only holds up on a host that can build every declared target; gate it to
+    // macOS (which builds the Apple targets too), matching where releases are cut.
+    tasks.matching { it.name == "klibApiCheck" }.configureEach {
+        onlyIf("klib ABI is validated on macOS, where every declared target builds") {
+            org.jetbrains.kotlin.konan.target.HostManager.hostIsMac
+        }
     }
 }
 
