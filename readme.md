@@ -15,7 +15,7 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.13.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> **Status:** `0.14.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
 > metadata filters, pluggable analyzers, full-precision re-rank, an optional kemus storage adapter and
 > an optional `kromus-onnx` embedder are usable today; the API may still change before 1.0. See the
 > roadmap for what's next.
@@ -42,7 +42,7 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.13.0")
+        implementation("io.github.kormium:kromus-core:0.14.0")
     }
 }
 ```
@@ -226,7 +226,9 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 9. **Re-rank** ✅ `rerank(query, candidates, k) { fullVector }` — two-phase search for quantized indexes.
 10. **Embeddings** ✅ optional [`kromus-onnx`](kromus-onnx/) — a `TextEmbedder` whose pipeline is shared
     on every target, with **`OnnxSession` backends for JVM, Android, web (JS + Wasm), iOS and desktop-native**.
-11. **Next** — `kromus-sync` (change-feed → auto-index); publish `kromus-kemus`/`kromus-onnx` to Central.
+11. **Sync** ✅ optional [`kromus-sync`](kromus-sync/) — keep an index fresh from a `Flow<List<T>>`
+    snapshot stream (e.g. `kormium-observe`); reconciles new/changed/removed with no data-layer dep.
+12. **Next** — publish `kromus-kemus`/`kromus-onnx`/`kromus-sync` to Maven Central.
 
 ## License
 

@@ -20,6 +20,10 @@ include("kromus-core")
 // common code on every target; the model runtime is per-platform (JVM backend ships, others plug in).
 include("kromus-onnx")
 
+// kromus-sync — keeps an index fresh from a Flow<List<T>> of snapshots (e.g. kormium-observe). Pure
+// kromus-core + coroutines, no data-layer dependency, so it needs no composite build.
+include("kromus-sync")
+
 // kromus-kemus — optional adapter that persists an index into a kemus store (embedded / offline /
 // online sync). It depends on io.github.kemus:kemus-core, which is not yet on Maven Central, so it
 // is only wired in when the sibling checkout is present next to this repo: a plain clone (and CI)
