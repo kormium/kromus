@@ -24,6 +24,14 @@ include("kromus-onnx")
 // kromus-core + coroutines, no data-layer dependency, so it needs no composite build.
 include("kromus-sync")
 
+// Runnable examples (JVM). `./gradlew :samples:<name>:run`.
+include(
+    "samples:quickstart",
+    "samples:hybrid",
+    "samples:quantization",
+    "samples:sync",
+)
+
 // kromus-kemus — optional adapter that persists an index into a kemus store (embedded / offline /
 // online sync). It depends on io.github.kemus:kemus-core, which is not yet on Maven Central, so it
 // is only wired in when the sibling checkout is present next to this repo: a plain clone (and CI)

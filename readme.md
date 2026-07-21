@@ -138,6 +138,11 @@ index.saveTo(kemus, "my-index", KeyCodec.string)
 val reloaded = loadHybridIndex(kemus, "my-index", KeyCodec.string)
 ```
 
+## Examples
+
+Runnable, self-contained samples live in [`samples/`](samples/):
+`./gradlew :samples:hybrid:run` (fusion + filters), and `:quickstart`, `:quantization`, `:sync`.
+
 ## Use cases
 
 kromus is a search *primitive*, so it powers more than a search box:

@@ -27,9 +27,14 @@ apiValidation {
     klib {
         enabled = true
     }
-    // Only kromus-core is API-locked for now: the adapter modules (onnx/kemus) are pre-1.0 and their
-    // surfaces still move. `benchmarks`/samples would go here too if added.
-    ignoredProjects.addAll(listOf("kromus-onnx", "kromus-kemus"))
+    // Only kromus-core is API-locked for now: the adapter/companion modules are pre-1.0 and their
+    // surfaces still move; the samples are apps, not API.
+    ignoredProjects.addAll(
+        listOf(
+            "kromus-onnx", "kromus-kemus", "kromus-sync",
+            "quickstart", "hybrid", "quantization", "sync",
+        ),
+    )
 }
 
 allprojects {
