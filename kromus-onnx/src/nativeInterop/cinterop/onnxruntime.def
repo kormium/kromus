@@ -1,0 +1,13 @@
+# ONNX Runtime C API bindings for Kotlin/Native (opt-in).
+#
+# The default build does NOT register this cinterop — it needs the ONNX Runtime C headers, which are
+# not vendored. Enable it by pointing the build at an ONNX Runtime install that contains
+# include/onnxruntime_c_api.h:
+#
+#   ./gradlew <task> -Pkromus.onnxCApi=/path/to/onnxruntime
+#
+# The desktop-native app then links libonnxruntime when it builds its executable and can drive the
+# generated `onnxruntime.*` bindings from an `OnnxRunner` (wrapped by CallbackOnnxSession). For most
+# apps, CallbackOnnxSession alone — with a runner over your own ORT binding — is the simpler path.
+package = onnxruntime
+headers = onnxruntime_c_api.h

@@ -19,7 +19,7 @@ TextEmbedder            ← what your app calls (common)
          ├ JVM / Android → ONNX Runtime (onnxruntime / -android)  ✅ shipped
          ├ Web (Kotlin/JS + Wasm) → onnxruntime-web               ✅ shipped
          ├ iOS → CallbackOnnxSession + Swift onnxruntime-objc     ✅ shipped
-         └ desktop-native → ONNX Runtime C API (cinterop)         (planned)
+         └ desktop-native → CallbackOnnxSession (+ opt-in ORT C)  ✅ shipped
 ```
 
 ## JVM & Android (shipped)
@@ -82,6 +82,22 @@ Kotlin/Wasm is the same `WebOnnxSession(ortSession)` through typed Wasm↔JS int
 of the build; run them in your app against a real model (this repo verifies the shared tokenizer +
 pipeline on JS and Wasm, not a full in-browser inference).
 
+## Desktop-native (Linux / macOS / Windows)
+
+`CallbackOnnxSession` already compiles on every native target, so a Kotlin/Native app implements
+`OnnxRunner` over its ONNX Runtime binding — the same framework-free bridge as iOS.
+
+To bind ORT directly from Kotlin/Native, a ready cinterop `.def` is provided
+([`src/nativeInterop/cinterop/onnxruntime.def`](src/nativeInterop/cinterop/onnxruntime.def)). It's
+**opt-in** — the default build vendors no ORT headers — enabled by pointing at an ONNX Runtime install:
+
+```
+./gradlew <task> -Pkromus.onnxCApi=/path/to/onnxruntime   # dir with include/onnxruntime_c_api.h
+```
+
+Your app links `libonnxruntime` when it builds its executable. (Unverified in this repo — it needs the
+ORT native library; `CallbackOnnxSession` with your own runner is the simpler, verified path.)
+
 ## Asymmetric models (E5, etc.)
 
 ```kotlin
@@ -93,10 +109,10 @@ embedder.embedDocument("Kotlin coroutines guide") // passage: …
 
 ## Status
 
-Pre-1.0, part of the kromus suite. Shared layer runs on every target; the JVM, Android, web (Kotlin/JS
-+ Wasm) and iOS `OnnxSession` backends ship. Desktop-native (ORT C API cinterop) is next. All Kotlin
-backends are verified to compile here; full inference runs in your app against a real model. Not yet
-published to Maven Central.
+Pre-1.0, part of the kromus suite. Shared layer runs on every target, with `OnnxSession` backends for
+JVM, Android, web (Kotlin/JS + Wasm), iOS and desktop-native (via `CallbackOnnxSession`; an opt-in ORT
+C cinterop is provided too). All Kotlin backends verified to compile here; full inference runs in your
+app against a real model. Not yet published to Maven Central.
 
 ## License
 

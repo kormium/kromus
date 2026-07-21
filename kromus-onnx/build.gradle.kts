@@ -49,6 +49,18 @@ kotlin {
 
     applyDefaultHierarchyTemplate()
 
+    // Opt-in ONNX Runtime C API bindings for desktop/native. Off by default so a plain build needs no
+    // ORT headers; enable with `-Pkromus.onnxCApi=/path/to/onnxruntime` (a dir with
+    // include/onnxruntime_c_api.h). See src/nativeInterop/cinterop/onnxruntime.def and the readme.
+    project.providers.gradleProperty("kromus.onnxCApi").orNull?.let { onnxRoot ->
+        targets.withType(org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget::class.java).configureEach {
+            compilations.getByName("main").cinterops.create("onnxruntime") {
+                defFile(project.file("src/nativeInterop/cinterop/onnxruntime.def"))
+                includeDirs("$onnxRoot/include")
+            }
+        }
+    }
+
     sourceSets {
         // The whole embedding pipeline — tokenizer, pooling, normalization — is pure Kotlin and lives
         // here, identical on every target. Only OnnxSession (the raw model call) is per-platform.
