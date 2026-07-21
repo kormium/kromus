@@ -8,8 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * JVM [OnnxSession] backed by ONNX Runtime for Java. Give it the raw bytes of an ONNX encoder model
- * (e.g. `all-MiniLM-L6-v2`); pair it with a [WordPieceTokenizer] and an [OnnxTextEmbedder].
+ * JVM / Android [OnnxSession] backed by ONNX Runtime for Java (`onnxruntime` on the JVM,
+ * `onnxruntime-android` on Android — same `ai.onnxruntime` API). Give it the raw bytes of an ONNX
+ * encoder model (e.g. `all-MiniLM-L6-v2`); pair it with a [WordPieceTokenizer] and an [OnnxTextEmbedder].
  *
  * ```
  * val session = OrtOnnxSession(File("model.onnx").readBytes())

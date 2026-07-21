@@ -16,16 +16,19 @@ its token embeddings. So adding a platform means writing one small backend, not 
 TextEmbedder            ← what your app calls (common)
  └ OnnxTextEmbedder      ← tokenize · pool · normalize (common, tested on JVM/JS/Wasm/Native)
      └ OnnxSession       ← the model runtime (per platform)
-         ├ JVM   → ONNX Runtime for Java              ✅ shipped
-         ├ Web   → onnxruntime-web (Kotlin/JS + Wasm) ✅ shipped
-         ├ iOS / native → ONNX Runtime C API (cinterop)   (planned)
-         └ Android → onnxruntime-android                  (planned)
+         ├ JVM / Android → ONNX Runtime (onnxruntime / -android)  ✅ shipped
+         ├ Web (Kotlin/JS + Wasm) → onnxruntime-web               ✅ shipped
+         ├ iOS → CallbackOnnxSession + Swift onnxruntime-objc     ✅ shipped
+         └ desktop-native → ONNX Runtime C API (cinterop)         (planned)
 ```
 
-## JVM (shipped)
+## JVM & Android (shipped)
+
+`OrtOnnxSession` runs on ONNX Runtime for Java. It's shared between JVM (`onnxruntime`) and Android
+(`onnxruntime-android`) — same `ai.onnxruntime` API, same code.
 
 ```kotlin
-val session = OrtOnnxSession(File("model.onnx").readBytes())
+val session = OrtOnnxSession(File("model.onnx").readBytes())   // Android: modelBytes from assets
 val tokenizer = WordPieceTokenizer.fromVocabText(File("vocab.txt").readText())
 val embedder = OnnxTextEmbedder(session, tokenizer, dimensions = 384)
 
@@ -35,6 +38,24 @@ val v: FloatArray = embedder.embed("Kotlin coroutines guide")   // ready for Vec
 Get a model and its `vocab.txt` from Hugging Face — e.g. `Xenova/all-MiniLM-L6-v2` (384-dim,
 mean-pooling), or export any sentence-transformer with `optimum-cli export onnx`. See the main
 [Embeddings](../readme.md#embeddings) section.
+
+## iOS (shipped)
+
+No cinterop: implement the callback-shaped `OnnxRunner` in Swift over `onnxruntime-objc`, then wrap it
+with `CallbackOnnxSession`. The tokenizer and pooling stay shared common code.
+
+```swift
+class OrtRunner: OnnxRunner {
+    func run(inputIds: KotlinIntArray, attentionMask: KotlinIntArray, tokenTypeIds: KotlinIntArray,
+             onResult: @escaping (KotlinFloatArray, KotlinInt, KotlinInt) -> Void,
+             onError: @escaping (KotlinThrowable) -> Void) {
+        // run the ORTSession, then: onResult(lastHiddenState, seqLen, hiddenSize)
+    }
+}
+```
+```kotlin
+val embedder = OnnxTextEmbedder(CallbackOnnxSession(ortRunner), tokenizer, dimensions = 384)
+```
 
 ## Web (Kotlin/JS & Kotlin/Wasm) — shipped
 
@@ -72,8 +93,9 @@ embedder.embedDocument("Kotlin coroutines guide") // passage: …
 
 ## Status
 
-Pre-1.0, part of the kromus suite. Shared layer runs on every target today; the JVM and web (Kotlin/JS
-+ Wasm) `OnnxSession` backends ship; iOS / Android / desktop-native backends are next. Not yet
+Pre-1.0, part of the kromus suite. Shared layer runs on every target; the JVM, Android, web (Kotlin/JS
++ Wasm) and iOS `OnnxSession` backends ship. Desktop-native (ORT C API cinterop) is next. All Kotlin
+backends are verified to compile here; full inference runs in your app against a real model. Not yet
 published to Maven Central.
 
 ## License

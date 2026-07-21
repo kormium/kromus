@@ -52,32 +52,41 @@ kotlin {
     sourceSets {
         // The whole embedding pipeline — tokenizer, pooling, normalization — is pure Kotlin and lives
         // here, identical on every target. Only OnnxSession (the raw model call) is per-platform.
+        // coroutines: CallbackOnnxSession bridges a callback runner to suspend; the web/jvm backends
+        // await/dispatch too.
+        val commonMain by getting {
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+            }
+        }
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
             }
         }
-        // JVM backend: ONNX Runtime for Java. Other backends (web via onnxruntime-web, iOS/native via
-        // the ORT C API, Android via onnxruntime-android) implement the same OnnxSession interface —
-        // see this module's readme.
+        // JVM + Android share one backend: onnxruntime and onnxruntime-android expose the same
+        // `ai.onnxruntime` Java API, so OrtOnnxSession lives in this intermediate source set. The API
+        // is compileOnly here; each target adds the runtime artifact it needs below.
+        val jvmAndroidMain by creating {
+            dependsOn(commonMain)
+            dependencies {
+                compileOnly("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+            }
+        }
         val jvmMain by getting {
+            dependsOn(jvmAndroidMain)
             dependencies {
                 implementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
             }
         }
-        // Web backends: await the onnxruntime-web InferenceSession.run() Promise. The app brings the
-        // ort module and the created session (see WebOnnxSession / the module readme).
-        val jsMain by getting {
+        val androidMain by getting {
+            dependsOn(jvmAndroidMain)
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+                implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
             }
         }
-        val wasmJsMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-            }
-        }
+        // Web (jsMain/wasmJsMain) and Apple (iosMain) backends need only coroutines, inherited from
+        // commonMain. Web awaits onnxruntime-web; iOS uses CallbackOnnxSession over a Swift runner.
     }
 }
