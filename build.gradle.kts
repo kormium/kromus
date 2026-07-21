@@ -32,7 +32,7 @@ apiValidation {
     ignoredProjects.addAll(
         listOf(
             "kromus-onnx", "kromus-kemus", "kromus-sync",
-            "common", "quickstart", "hybrid", "quantization", "sync",
+            "common", "quickstart", "hybrid", "quantization", "sync", "onnx",
         ),
     )
 }

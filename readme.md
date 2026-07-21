@@ -140,8 +140,9 @@ val reloaded = loadHybridIndex(kemus, "my-index", KeyCodec.string)
 
 ## Examples
 
-Runnable, self-contained samples live in [`samples/`](samples/):
-`./gradlew :samples:hybrid:run` (fusion + filters), and `:quickstart`, `:quantization`, `:sync`.
+Runnable samples live in [`samples/`](samples/): `:quickstart`, `:hybrid`, `:quantization`, `:sync`
+(readable toy embedder), plus **`./gradlew :samples:onnx:run`** — real semantic search with a genuine
+`all-MiniLM-L6-v2` model (auto-downloaded via `kromus-onnx`).
 
 ## Use cases
 

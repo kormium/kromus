@@ -32,6 +32,7 @@ include(
     "samples:hybrid",
     "samples:quantization",
     "samples:sync",
+    "samples:onnx",
 )
 
 // kromus-kemus — optional adapter that persists an index into a kemus store (embedded / offline /
