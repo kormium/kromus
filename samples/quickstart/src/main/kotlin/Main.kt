@@ -5,34 +5,38 @@ import io.github.kromus.Metric
 import io.github.kromus.VectorIndex
 import io.github.kromus.decodeVectorIndex
 import io.github.kromus.encodeToByteArray
+import io.github.kromus.samples.common.ToyEmbedder
 
 /**
- * The 60-second tour: build a vector index, search it, persist it.
+ * Semantic search in a nutshell: find things by *meaning*, not just matching words.
  *
  * Run: `./gradlew :samples:quickstart:run`
- *
- * The vectors here are hand-made 3-D "topic" coordinates — axes [programming, cooking, music] — so the
- * demo is self-contained. In a real app you'd get them from an embedding model (see `kromus-onnx`).
  */
 fun main() {
-    val index = VectorIndex<String>(dimensions = 3, metric = Metric.Cosine)
+    val embedder = ToyEmbedder() // stands in for a real embedding model (see kromus-onnx)
+    val index = VectorIndex<String>(dimensions = embedder.dimensions, metric = Metric.Cosine)
 
-    index.add("kotlin-coroutines-guide", floatArrayOf(1f, 0f, 0f))
-    index.add("structured-concurrency", floatArrayOf(0.9f, 0.1f, 0f))
-    index.add("sourdough-recipe", floatArrayOf(0f, 1f, 0f))
-    index.add("jazz-history", floatArrayOf(0f, 0f, 1f))
+    // Index a few articles by their titles.
+    val titles = listOf(
+        "Kotlin coroutines guide",
+        "Sourdough bread from scratch",
+        "A history of jazz",
+        "Backpacking in the Alps",
+    )
+    for (title in titles) index.add(title, embedder.embed(title))
 
-    println("Query: something about programming\n")
-    val query = floatArrayOf(1f, 0.05f, 0f)
-    for (hit in index.search(query, k = 3)) {
-        println("  ${format(hit.score)}  ${hit.key}")
+    // Ask a plain-English question that shares NO words with any title.
+    val question = "how do I write asynchronous code?"
+    println("Search: \"$question\"\n")
+    for (hit in index.search(embedder.embed(question), k = 3)) {
+        println("  ${percent(hit.score)}  ${hit.key}")
     }
+    println("\n→ It found the coroutines guide from the *meaning* — not one word overlaps with the query.")
 
-    // Building the graph is the expensive part; persist it and reload instantly next run.
+    // Building the index is the costly part; persist it and reload instantly next run.
     val bytes = index.encodeToByteArray(KeyCodec.string)
     val reloaded = decodeVectorIndex(bytes, KeyCodec.string)
-    println("\nPersisted ${index.size} vectors to ${bytes.size} bytes, reloaded ${reloaded.size}.")
+    println("Persisted ${index.size} items to ${bytes.size} bytes; reloaded ${reloaded.size}.")
 }
 
-private fun format(score: Float): String =
-    ((score * 1000).toInt() / 1000.0).toString().padEnd(5, ' ')
+private fun percent(score: Float): String = "${(score * 100).toInt()}%".padStart(4)

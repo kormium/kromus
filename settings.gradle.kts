@@ -24,8 +24,10 @@ include("kromus-onnx")
 // kromus-core + coroutines, no data-layer dependency, so it needs no composite build.
 include("kromus-sync")
 
-// Runnable examples (JVM). `./gradlew :samples:<name>:run`.
+// Runnable examples (JVM). `./gradlew :samples:<name>:run`. `samples:common` holds the ToyEmbedder
+// (a readable stand-in for a real embedding model) the samples share.
 include(
+    "samples:common",
     "samples:quickstart",
     "samples:hybrid",
     "samples:quantization",

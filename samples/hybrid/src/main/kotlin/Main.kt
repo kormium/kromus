@@ -1,30 +1,42 @@
 package io.github.kromus.samples.hybrid
 
 import io.github.kromus.HybridIndex
+import io.github.kromus.samples.common.ToyEmbedder
 
 /**
- * Why hybrid beats either retriever alone — and metadata filters.
+ * Why you want *both* kinds of search — and why fusing them wins.
+ *
+ * - Vector search understands **meaning** (great for questions), but can't match an exact code like
+ *   `E-4021` — a code has no "meaning" to embed.
+ * - Keyword search (BM25) nails **exact tokens** (codes, names, IDs), but misses paraphrases.
+ * - Hybrid runs both and merges the rankings, so you get each one's strength.
  *
  * Run: `./gradlew :samples:hybrid:run`
- *
- * Vectors are hand-made 3-D topic coordinates [programming, cooking, music]. Watch how:
- * - vector search finds the *semantically* related doc even though it shares no query words,
- * - BM25 finds the doc with the exact keyword,
- * - the hybrid returns both.
  */
 fun main() {
-    val index = HybridIndex<String>(dimensions = 3)
+    val embedder = ToyEmbedder()
+    val index = HybridIndex<String>(dimensions = embedder.dimensions)
 
-    // (topic vector, document text, attributes)
-    index.add("concurrency", floatArrayOf(1f, 0f, 0f), "Structured concurrency and thread pools", mapOf("lang" to "en"))
-    index.add("cheatsheet", floatArrayOf(0f, 1f, 0f), "Kotlin coroutines cheat sheet", mapOf("lang" to "en"))
-    index.add("jazz", floatArrayOf(0f, 0f, 1f), "Eine Geschichte des Jazz", mapOf("lang" to "de"))
+    // (key, vector-from-meaning, the searchable text)
+    add(index, embedder, "Kotlin coroutines guide", "A guide to Kotlin coroutines and asynchronous programming")
+    add(index, embedder, "Error E-4021 on startup", "How to fix error E-4021 that appears on startup")
+    add(index, embedder, "Sourdough bread basics", "Baking sourdough bread at home")
 
-    val queryVector = floatArrayOf(1f, 0f, 0f) // semantically: programming / concurrency
-    val queryText = "coroutines"               // exact keyword
+    val byMeaning = "how do I write async code?" // a question — no doc contains these words
+    val exactCode = "E-4021"                     // an exact code — embeddings can't match it
 
-    println("vector-only : ${index.searchVector(queryVector, k = 3).map { it.key }}")
-    println("text-only   : ${index.searchText(queryText, k = 3).map { it.key }}")
-    println("hybrid      : ${index.search(queryVector, queryText, k = 3).map { it.key }}")
-    println("hybrid (en) : ${index.search(queryVector, queryText, k = 3) { it["lang"] == "en" }.map { it.key }}")
+    println("Ask a question (vector search understands meaning):")
+    println("  \"$byMeaning\"")
+    println("   → ${index.searchVector(embedder.embed(byMeaning), k = 1).map { it.key }}")
+
+    println("\nSearch an exact code (keyword search / BM25):")
+    println("  \"$exactCode\"")
+    println("   → ${index.searchText(exactCode, k = 1).map { it.key }}   (vector search alone can't find this)")
+
+    println("\nHybrid — the question AND the code together:")
+    println("   → ${index.search(embedder.embed(byMeaning), exactCode, k = 2).map { it.key }}")
+}
+
+private fun add(index: HybridIndex<String>, embedder: ToyEmbedder, key: String, text: String) {
+    index.add(key, embedder.embed(text), text)
 }

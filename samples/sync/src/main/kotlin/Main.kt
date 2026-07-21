@@ -2,38 +2,50 @@ package io.github.kromus.samples.sync
 
 import io.github.kromus.Metric
 import io.github.kromus.VectorIndex
+import io.github.kromus.samples.common.ToyEmbedder
 import io.github.kromus.sync.syncTo
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 
-/** A row from your data layer. `rev` bumps whenever the row changes. */
-private class Note(val id: Int, val rev: Int, val vector: FloatArray)
+/** A note in a notes app. `rev` bumps every time the note is edited. */
+private class Note(val id: Int, val rev: Int, val text: String)
 
 /**
- * Keep an index in step with changing data. Here the "data layer" is a flow of three snapshots; in a
- * real app it's `Users.observe(db) { … }` from kormium-observe — same shape, `Flow<List<T>>`.
+ * Keep search in step with your data — automatically.
+ *
+ * As the user adds, edits and deletes notes, the search index follows along. Here the "notes app" is
+ * a flow of three snapshots; in a real app it's `Users.observe(db) { … }` from kormium-observe — the
+ * same shape, `Flow<List<T>>`.
  *
  * Run: `./gradlew :samples:sync:run`
  */
 fun main() = runBlocking {
-    val index = VectorIndex<Int>(dimensions = 3, metric = Metric.Cosine)
+    val embedder = ToyEmbedder()
+    val index = VectorIndex<Int>(dimensions = embedder.dimensions, metric = Metric.Cosine)
 
-    val snapshot1 = listOf(Note(1, 1, v(1f, 0f, 0f)), Note(2, 1, v(0f, 1f, 0f)))
-    val snapshot2 = listOf(Note(1, 2, v(0f, 0f, 1f)), Note(3, 1, v(1f, 1f, 0f))) // 1 edited, 2 deleted, 3 added
-    val snapshot3 = listOf(Note(1, 2, v(0f, 0f, 1f)))                             // 3 deleted, 1 unchanged
+    val afterAdding = listOf(
+        Note(1, 1, "buy sourdough starter"),
+        Note(2, 1, "read the Kotlin coroutines docs"),
+    )
+    val afterEditing = listOf(
+        Note(1, 2, "buy sourdough starter and flour"), // note 1 edited
+        Note(3, 1, "plan a hiking trip in the Alps"),  // note 2 deleted, note 3 added
+    )
+    val noChange = afterEditing // user opens the app again; nothing changed
 
     var embedCalls = 0
-    flowOf(snapshot1, snapshot2, snapshot3).syncTo(
-        index,
-        keyOf = { it.id },
-        versionOf = { it.rev },        // re-embed only when the row actually changed
-    ) { note ->
+    val notesByRun = flowOf(afterAdding, afterEditing, noChange)
+    notesByRun.syncTo(index, keyOf = { it.id }, versionOf = { it.rev }) { note ->
         embedCalls++
-        note.vector
+        embedder.embed(note.text)
     }
 
-    println("final index: ${index.size} note(s), keys = ${(1..3).filter { it in index }}")
-    println("embed calls: $embedCalls  (the unchanged row in snapshot 3 was skipped)")
-}
+    println("The index now holds ${index.size} live note(s): ${(1..3).filter { it in index }}")
+    println("Embeddings computed: $embedCalls (the unchanged note on the last run was skipped)\n")
 
-private fun v(vararg xs: Float) = floatArrayOf(*xs)
+    // Search the up-to-date index.
+    for (query in listOf("baking", "mountains")) {
+        val hit = index.search(embedder.embed(query), k = 1).firstOrNull()?.key
+        println("Search \"$query\" → note #$hit")
+    }
+}

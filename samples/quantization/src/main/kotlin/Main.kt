@@ -10,42 +10,41 @@ import io.github.kromus.rerank
 import kotlin.random.Random
 
 /**
- * Fit more on device with binary quantization (~32× smaller), then recover accuracy with a
- * full-precision re-rank (two-phase search).
+ * Fitting a lot of vectors on a phone.
+ *
+ * Real embeddings are big — often 384 numbers each. With thousands of documents that adds up.
+ * "Binary quantization" keeps just the sign of each number (1 bit instead of 32), shrinking the
+ * vectors ~32×. That makes search a bit rough, so you do it in two steps: a fast rough search to get
+ * candidates, then re-score those few candidates with the exact vectors. You get small *and* accurate.
  *
  * Run: `./gradlew :samples:quantization:run`
  */
 fun main() {
-    val dim = 128
+    val dimensions = 384
     val rng = Random(1)
 
-    // 15 clusters of 60 points each — embedding-like data.
-    val data = ArrayList<FloatArray>()
-    val centers = List(15) { FloatArray(dim) { rng.nextFloat() * 2f - 1f } }
-    for (center in centers) repeat(60) {
-        data.add(FloatArray(dim) { center[it] + (rng.nextFloat() * 2f - 1f) * 0.10f })
+    // Stand in for 750 document embeddings from a real model, in 15 topical clusters.
+    val embeddings = ArrayList<FloatArray>()
+    val clusterCenters = List(15) { FloatArray(dimensions) { rng.nextFloat() * 2f - 1f } }
+    for (center in clusterCenters) repeat(50) {
+        embeddings.add(FloatArray(dimensions) { center[it] + (rng.nextFloat() * 2f - 1f) * 0.10f })
     }
 
-    val binary = VectorIndex<Int>(dim, Metric.Cosine, HnswConfig(quantization = Quantization.Binary))
-    val float32 = VectorIndex<Int>(dim, Metric.Cosine)
-    data.forEachIndexed { i, v -> binary.add(i, v); float32.add(i, v) }
+    val binary = VectorIndex<Int>(dimensions, Metric.Cosine, HnswConfig(quantization = Quantization.Binary))
+    embeddings.forEachIndexed { id, vector -> binary.add(id, vector) }
 
-    // Vector data itself: float32 is dim*4 bytes/vector, binary is dim/8 — about 32× smaller.
-    val floatVectorBytes = data.size * dim * 4
-    val binaryVectorBytes = data.size * ((dim + 7) / 8)
-    println("vector data : float32 = $floatVectorBytes bytes,  binary = $binaryVectorBytes bytes  (~${floatVectorBytes / binaryVectorBytes}× smaller)")
-    // The full serialized index also carries the (identical) HNSW graph, so the total ratio is smaller.
-    val floatPayload = float32.encodeToByteArray(KeyCodec.int).size
-    val binaryPayload = binary.encodeToByteArray(KeyCodec.int).size
-    println("full payload: float32 = $floatPayload bytes,  binary = $binaryPayload bytes  (graph included)\n")
+    val floatVectorKb = embeddings.size * dimensions * 4 / 1024
+    val binaryVectorKb = embeddings.size * ((dimensions + 7) / 8) / 1024
+    println("Vector memory: full precision ≈ ${floatVectorKb} KB,  binary ≈ ${binaryVectorKb} KB  (~${floatVectorKb / binaryVectorKb}× smaller)\n")
 
-    // Query near cluster 3.
-    val query = FloatArray(dim) { centers[3][it] + (rng.nextFloat() * 2f - 1f) * 0.10f }
+    // A query near cluster #3 (its documents are ids 150..199).
+    val query = FloatArray(dimensions) { clusterCenters[3][it] + (rng.nextFloat() * 2f - 1f) * 0.10f }
 
-    val coarse = binary.search(query, k = 50).map { it.key }        // fast, approximate
-    val reranked = rerank(query, coarse, k = 5, Metric.Cosine) { data[it] }  // exact top-5
+    val roughTop5 = binary.search(query, k = 5).map { it.key }
+    val candidates = binary.search(query, k = 50).map { it.key }
+    val exactTop5 = rerank(query, candidates, k = 5, Metric.Cosine) { embeddings[it] }.map { it.key }
 
-    println("binary top-5   : ${binary.search(query, k = 5).map { it.key }}")
-    println("re-ranked top-5: ${reranked.map { it.key }}")
-    println("\n(all keys ${3 * 60}..${4 * 60 - 1} belong to the query's cluster)")
+    println("Step 1 — fast rough search (binary):     $roughTop5")
+    println("Step 2 — re-ranked with exact vectors:   $exactTop5")
+    println("\n(cluster #3 = document ids 150..199 — the re-ranked hits should all land in that range)")
 }

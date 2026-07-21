@@ -13,6 +13,7 @@ kotlin {
 
 dependencies {
     implementation(project(":kromus-core"))
+    implementation(project(":samples:common"))
 }
 
 application {
