@@ -53,8 +53,7 @@ kotlin {
         val commonMain by getting {
             dependencies {
                 api(project(":kromus-core"))
-                // Substituted by the local kemus build via the composite build wired in settings.
-                api("io.github.kemus:kemus-core:0.2.0")
+                api("io.github.kormium:kemus-core:0.2.0")
             }
         }
         val commonTest by getting {
