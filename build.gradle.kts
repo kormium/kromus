@@ -79,6 +79,25 @@ allprojects {
 // out-of-band via ORG_GRADLE_PROJECT_* env vars in CI — see gradle.properties.
 val publishableModules = setOf(
     "kromus-core",
+    "kromus-kemus",
+    "kromus-onnx",
+    "kromus-sync",
+)
+
+val moduleDescriptions = mapOf(
+    "kromus-core" to
+        ("kromus — an embedded, reflection-free Kotlin Multiplatform hybrid search engine: a pure-Kotlin " +
+            "HNSW vector index with a full-text/BM25 layer and RRF hybrid queries, quantization, metadata " +
+            "filters and binary persistence, running on JVM, Android, iOS, Native and the web (Wasm)."),
+    "kromus-kemus" to
+        ("kromus-kemus — an optional kromus adapter that persists a vector/full-text index into a kemus " +
+            "store (embedded, offline-first, with online sync)."),
+    "kromus-onnx" to
+        ("kromus-onnx — a text embedder for kromus: one common-code pipeline (WordPiece tokenizer, " +
+            "pooling, L2 normalization) with pluggable ONNX Runtime backends on every target."),
+    "kromus-sync" to
+        ("kromus-sync — keeps a kromus index fresh from a Flow<List<T>> snapshot stream, reconciling " +
+            "added/changed/removed entries with no data-layer dependency."),
 )
 
 subprojects {
@@ -92,12 +111,8 @@ subprojects {
         coordinates(group.toString(), name, version.toString())
 
         pom {
-            name.set("kromus")
-            description.set(
-                "kromus — an embedded, reflection-free Kotlin Multiplatform hybrid search engine: " +
-                    "a pure-Kotlin HNSW vector index (with a full-text/BM25 layer and RRF hybrid " +
-                    "queries on the roadmap) that runs on JVM, Android, iOS, Native and the web (Wasm).",
-            )
+            name.set(project.name)
+            description.set(moduleDescriptions.getValue(project.name))
             inceptionYear.set("2026")
             url.set("https://github.com/kormium/kromus")
             licenses {
