@@ -3,7 +3,16 @@ name: Release
 on:
   push:
     tags: [ "v*" ]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      modules:
+        description: >-
+          Space-separated Gradle project paths to publish (e.g. ":kromus-kemus :kromus-onnx").
+          Leave empty to publish every module in publishableModules (build.gradle.kts) — only do
+          that for a version that has never been uploaded before, since Central Portal rejects a
+          re-upload of a GAV that's already been released.
+        required: false
+        default: ""
 
 jobs:
   publish:
@@ -17,10 +26,17 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - name: Publish kromus-core to Maven Central (staged; release is a manual step in Central Portal)
+      - name: Publish to Maven Central (staged; release is a manual step in Central Portal)
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
-        run: ./gradlew publishToMavenCentral --stacktrace
+        run: |
+          if [ -n "${{ inputs.modules }}" ]; then
+            tasks=""
+            for m in ${{ inputs.modules }}; do tasks="$tasks $m:publishToMavenCentral"; done
+            ./gradlew $tasks --stacktrace
+          else
+            ./gradlew publishToMavenCentral --stacktrace
+          fi
