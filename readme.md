@@ -43,6 +43,11 @@ KMP matrix**. That is the gap kromus fills.
 kotlin {
     sourceSets.commonMain.dependencies {
         implementation("io.github.kormium:kromus-core:0.14.0")
+
+        // Optional companion modules — see their own readmes for details.
+        implementation("io.github.kormium:kromus-kemus:0.14.0") // persist into a kemus store
+        implementation("io.github.kormium:kromus-onnx:0.14.0")  // on-device text embedder
+        implementation("io.github.kormium:kromus-sync:0.14.0")  // keep an index fresh from a Flow
     }
 }
 ```
@@ -234,7 +239,7 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
     on every target, with **`OnnxSession` backends for JVM, Android, web (JS + Wasm), iOS and desktop-native**.
 11. **Sync** ✅ optional [`kromus-sync`](kromus-sync/) — keep an index fresh from a `Flow<List<T>>`
     snapshot stream (e.g. `kormium-observe`); reconciles new/changed/removed with no data-layer dep.
-12. **Next** — publish `kromus-kemus`/`kromus-onnx`/`kromus-sync` to Maven Central.
+12. **Maven Central** ✅ `kromus-core`, `kromus-kemus`, `kromus-onnx` and `kromus-sync` are all published.
 
 ## License
 
