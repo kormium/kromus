@@ -15,10 +15,10 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.14.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
-> metadata filters, pluggable analyzers, full-precision re-rank, an optional kemus storage adapter and
-> an optional `kromus-onnx` embedder are usable today; the API may still change before 1.0. See the
-> roadmap for what's next.
+> **Status:** `0.15.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> metadata filters, pluggable analyzers, full-precision re-rank, optional adapters for kemus storage,
+> ONNX embeddings, flow-driven sync and concurrent access are usable today; the API may still change
+> before 1.0. See the roadmap for what's next.
 
 ## Why it exists
 
@@ -42,12 +42,13 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.14.0")
+        implementation("io.github.kormium:kromus-core:0.15.0")
 
         // Optional companion modules — see their own readmes for details.
-        implementation("io.github.kormium:kromus-kemus:0.14.0") // persist into a kemus store
-        implementation("io.github.kormium:kromus-onnx:0.14.0")  // on-device text embedder
-        implementation("io.github.kormium:kromus-sync:0.14.0")  // keep an index fresh from a Flow
+        implementation("io.github.kormium:kromus-kemus:0.15.0")      // persist into a kemus store
+        implementation("io.github.kormium:kromus-onnx:0.15.0")       // on-device text embedder
+        implementation("io.github.kormium:kromus-sync:0.15.0")       // keep an index fresh from a Flow
+        implementation("io.github.kormium:kromus-concurrent:0.15.0") // use one index from many coroutines
     }
 }
 ```
@@ -143,6 +144,24 @@ index.saveTo(kemus, "my-index", KeyCodec.string)
 val reloaded = loadHybridIndex(kemus, "my-index", KeyCodec.string)
 ```
 
+## Concurrency
+
+The indexes are single-threaded by design — that is what keeps the core zero-dependency and identical
+on every target. For the usual on-device shape (*index in the background, search from the UI*), the
+optional **`kromus-concurrent`** module wraps any index in a suspending **readers-writer** lock:
+searches run concurrently with each other, mutations run alone, and no caller blocks a thread.
+
+```kotlin
+val index = ConcurrentHybridIndex<String>(dimensions = 384)
+
+scope.launch { index.add("doc-1", embedder.embed(text), text) }   // exclusive
+val hits = index.search(embedder.embed(query), query, k = 10)     // parallel with other searches
+```
+
+A plain `Mutex` would also be safe, but it would serialize searches — and search is the hot path and
+strictly read-only here, so it's exactly the work worth parallelizing. See
+[`kromus-concurrent`](kromus-concurrent/).
+
 ## Examples
 
 Runnable samples live in [`samples/`](samples/): `:quickstart`, `:hybrid`, `:quantization`, `:sync`
@@ -201,8 +220,8 @@ model — store the model id/version next to the index so you never mix embeddin
 **Batteries-included?** The core stays model-free on purpose — but the optional
 [`kromus-onnx`](kromus-onnx/) module is the ready-to-run path. Its `TextEmbedder` pipeline (WordPiece
 tokenizer → model → pooling → normalization) is shared common code on **every** target, including the
-web; only the model runtime is per-platform (JVM backend ships today, web/iOS/Android/native plug into
-the same `OnnxSession`).
+web; only the model runtime is per-platform, and `OnnxSession` backends ship for JVM, Android, web
+(Kotlin/JS + Wasm), iOS and desktop-native.
 
 ```kotlin
 val embedder = OnnxTextEmbedder(OrtOnnxSession(modelBytes), tokenizer, dimensions = 384)
@@ -240,6 +259,8 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 11. **Sync** ✅ optional [`kromus-sync`](kromus-sync/) — keep an index fresh from a `Flow<List<T>>`
     snapshot stream (e.g. `kormium-observe`); reconciles new/changed/removed with no data-layer dep.
 12. **Maven Central** ✅ `kromus-core`, `kromus-kemus`, `kromus-onnx` and `kromus-sync` are all published.
+13. **Concurrency** ✅ optional [`kromus-concurrent`](kromus-concurrent/) — suspending readers-writer
+    guards: concurrent searches, exclusive mutations, writer-preferring, no blocked threads.
 
 ## License
 

@@ -16,7 +16,8 @@ import kotlin.math.ln
  * val hits = index.search("kotlin coroutines", k = 10) // BM25-ranked, best first
  * ```
  *
- * Keys are unique: re-[add]ing replaces the document. Not thread-safe.
+ * Keys are unique: re-[add]ing replaces the document. Not thread-safe — for concurrent use wrap it
+ * in `ConcurrentTextIndex` from the optional `kromus-concurrent` module.
  *
  * @property analyzer tokenizer used for both indexing and querying; see [Analyzer].
  * @property config BM25 tuning; see [Bm25Config].

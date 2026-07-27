@@ -24,6 +24,10 @@ include("kromus-onnx")
 // kromus-core + coroutines, no data-layer dependency, so it needs no composite build.
 include("kromus-sync")
 
+// kromus-concurrent — suspending readers-writer guards around the (single-threaded by design) core
+// indexes: concurrent searches, exclusive mutations. kromus-core + coroutines.
+include("kromus-concurrent")
+
 // Runnable examples (JVM). `./gradlew :samples:<name>:run`. `samples:common` holds the ToyEmbedder
 // (a readable stand-in for a real embedding model) the samples share.
 include(

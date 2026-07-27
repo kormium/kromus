@@ -19,7 +19,8 @@ package io.github.kromus
  * )
  * ```
  *
- * Keys are unique across both modalities; re-[add]ing replaces the entry. Not thread-safe.
+ * Keys are unique across both modalities; re-[add]ing replaces the entry. Not thread-safe — for
+ * concurrent use wrap it in `ConcurrentHybridIndex` from the optional `kromus-concurrent` module.
  *
  * @property rrfK fusion constant passed to [Rrf.fuse].
  */

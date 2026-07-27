@@ -18,7 +18,8 @@ package io.github.kromus
  * ```
  *
  * Keys are unique: re-[add]ing an existing key replaces its vector. Not thread-safe — mutate and
- * query from a single thread or under external synchronization.
+ * query from a single thread, or wrap it in `ConcurrentVectorIndex` from the optional
+ * `kromus-concurrent` module (concurrent searches, exclusive mutations).
  *
  * @param K the caller-facing identifier type. Must have stable `hashCode`/`equals`.
  * @property dimensions required length of every vector.

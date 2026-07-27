@@ -31,7 +31,7 @@ apiValidation {
     // surfaces still move; the samples are apps, not API.
     ignoredProjects.addAll(
         listOf(
-            "kromus-onnx", "kromus-kemus", "kromus-sync",
+            "kromus-onnx", "kromus-kemus", "kromus-sync", "kromus-concurrent",
             "common", "quickstart", "hybrid", "quantization", "sync", "onnx",
         ),
     )
@@ -82,6 +82,7 @@ val publishableModules = setOf(
     "kromus-kemus",
     "kromus-onnx",
     "kromus-sync",
+    "kromus-concurrent",
 )
 
 val moduleDescriptions = mapOf(
@@ -98,6 +99,9 @@ val moduleDescriptions = mapOf(
     "kromus-sync" to
         ("kromus-sync — keeps a kromus index fresh from a Flow<List<T>> snapshot stream, reconciling " +
             "added/changed/removed entries with no data-layer dependency."),
+    "kromus-concurrent" to
+        ("kromus-concurrent — suspending readers-writer guards for kromus indexes: searches run " +
+            "concurrently, mutations run exclusively, and no caller blocks a thread."),
 )
 
 subprojects {
