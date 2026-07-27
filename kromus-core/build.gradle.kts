@@ -43,13 +43,33 @@ kotlin {
     // Browser / Node web clients. The engine is pure computation over FloatArray, so it compiles
     // to the whole web stack; nodejs() is enough to run the tests, browser() lets consumers ship it.
     js {
-        browser()
-        nodejs()
+        // The recall/purity tests index thousands of vectors and take ~2s on JS, which is Mocha's
+        // default per-test timeout — fast enough on a dev machine, over the line on a CI runner.
+        // They are honest tests of a slow-by-nature operation, so raise the limit rather than
+        // shrink the corpus and weaken what they measure.
+        browser {
+            testTask {
+                useKarma {
+                    useChromeHeadless()
+                    // Karma runs Mocha in the browser; its timeout is set through the client config.
+                    useConfigDirectory(project.file("karma.config.d"))
+                }
+            }
+        }
+        nodejs {
+            testTask {
+                useMocha { timeout = "60s" }
+            }
+        }
     }
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
         browser()
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha { timeout = "60s" }
+            }
+        }
     }
 
     applyDefaultHierarchyTemplate()
