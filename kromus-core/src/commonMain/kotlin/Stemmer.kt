@@ -18,8 +18,7 @@ public fun interface Stemmer {
             var s = term
             when {
                 s.length > 4 && s.endsWith("ies") -> s = s.dropLast(3) + "y"
-                s.length > 4 && (s.endsWith("ses") || s.endsWith("xes") || s.endsWith("zes") ||
-                    s.endsWith("ches") || s.endsWith("shes")) -> s = s.dropLast(2)
+                s.length > 4 && ES_PLURALS.any { s.endsWith(it) } -> s = s.dropLast(2)
                 s.length > 3 && s.endsWith("s") && !s.endsWith("ss") -> s = s.dropLast(1)
             }
             when {
@@ -31,3 +30,6 @@ public fun interface Stemmer {
         }
     }
 }
+
+/** Plural endings that drop only `es`, keeping the sibilant stem (`boxes` -> `box`). */
+private val ES_PLURALS = listOf("ses", "xes", "zes", "ches", "shes")

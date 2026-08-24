@@ -5,7 +5,10 @@ package io.github.kromus
  * boxing. Configured once as a min-heap or a max-heap. Used for the two candidate structures in
  * HNSW's layer search (a min-heap of the frontier to expand, a max-heap of the best results found).
  */
-internal class FloatHeap(private val minHeap: Boolean, initialCapacity: Int = 16) {
+internal class FloatHeap(
+    private val minHeap: Boolean,
+    initialCapacity: Int = 16,
+) {
     private var ids = IntArray(initialCapacity)
     private var keys = FloatArray(initialCapacity)
 
@@ -14,7 +17,17 @@ internal class FloatHeap(private val minHeap: Boolean, initialCapacity: Int = 16
 
     fun isEmpty(): Boolean = size == 0
 
-    fun peekId(): Int = ids[0]
+    /** Empties the heap without releasing its arrays, so one instance can serve many searches. */
+    fun clear() {
+        size = 0
+    }
+
+    /** Grows the backing arrays to hold [capacity] elements without reallocating mid-search. */
+    fun reserve(capacity: Int) {
+        if (ids.size >= capacity) return
+        ids = ids.copyOf(capacity)
+        keys = keys.copyOf(capacity)
+    }
 
     fun peekKey(): Float = keys[0]
 

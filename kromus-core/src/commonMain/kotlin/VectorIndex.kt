@@ -29,7 +29,7 @@ public class VectorIndex<K> private constructor(
     public val dimensions: Int,
     public val metric: Metric,
     public val config: HnswConfig,
-    private val hnsw: Hnsw,
+    private var hnsw: Hnsw,
 ) {
     /** Creates an empty index. */
     public constructor(
@@ -50,6 +50,15 @@ public class VectorIndex<K> private constructor(
 
     /** Number of live (non-removed) entries. */
     public val size: Int get() = idOf.size
+
+    /**
+     * Slots held by removed or replaced entries — memory and traversal cost the index still pays.
+     * See [compact].
+     */
+    public val tombstones: Int get() = hnsw.tombstones
+
+    /** The live keys, in insertion order of their current vectors. Read-only; do not retain across edits. */
+    public val keys: Set<K> get() = idOf.keys
 
     public operator fun contains(key: K): Boolean = idOf.containsKey(key)
 
@@ -80,7 +89,7 @@ public class VectorIndex<K> private constructor(
     /**
      * Removes [key] if present. The underlying vector is flagged and stops appearing in results while
      * remaining a routing hop in the graph, so lookups stay correct and connected. Reclaiming that
-     * space requires a rebuild (planned for a later version).
+     * space requires [compact].
      *
      * @return true if [key] was present.
      */
@@ -96,6 +105,9 @@ public class VectorIndex<K> private constructor(
      *
      * @param efSearch dynamic candidate-list size for this query; larger trades latency for recall.
      *   Defaults to [HnswConfig.efSearch] and is raised to at least [k].
+     * @param maxVisited cap on nodes touched by this query; `0` means the whole index. Bounds the
+     *   worst case of a very selective [filter] at the price of possibly fewer than [k] results —
+     *   see [HnswConfig.maxVisited].
      * @param filter optional predicate over each entry's [attributes][add]; only entries it accepts
      *   are returned. Applied during traversal, so a filtered query still yields up to [k] matches
      *   (a very selective filter benefits from a larger [efSearch]).
@@ -105,6 +117,7 @@ public class VectorIndex<K> private constructor(
         query: FloatArray,
         k: Int,
         efSearch: Int = config.efSearch,
+        maxVisited: Int = config.maxVisited,
         filter: MetadataFilter? = null,
     ): List<SearchResult<K>> {
         require(query.size == dimensions) {
@@ -112,9 +125,98 @@ public class VectorIndex<K> private constructor(
         }
         require(k >= 1) { "k must be >= 1, was $k" }
         val accept: (Int) -> Boolean = if (filter == null) { { true } } else { { id -> filter(attrsOf[id]) } }
-        return hnsw.query(query, k, efSearch, accept).mapNotNull { (id, score) ->
-            keyOf[id]?.let { SearchResult(it, score) }
+        val hits = hnsw.query(query, k, efSearch, maxVisited, accept)
+        val out = ArrayList<SearchResult<K>>(hits.size)
+        for (i in 0 until hits.size) {
+            val key = keyOf[hits.ids[i]] ?: continue
+            out.add(SearchResult(key, hits.scores[i]))
         }
+        return out
+    }
+
+    /**
+     * Replaces the [attributes][add] stored for [key] without touching the graph.
+     *
+     * Re-[add]ing an entry just to change a metadata value would insert a whole new node and leave a
+     * tombstone behind; this does not. Prefer it whenever the vector itself has not changed.
+     *
+     * @return true if [key] was present.
+     */
+    public fun updateAttributes(key: K, attributes: Map<String, String>): Boolean {
+        val id = idOf[key] ?: return false
+        attrsOf[id] = attributes
+        return true
+    }
+
+    /**
+     * Returns the vector stored for [key], or null if absent.
+     *
+     * The vector comes back in *stored* form: L2-normalized when the metric is [Metric.Cosine], and
+     * dequantized (so, approximate) when [HnswConfig.quantization] is not [Quantization.None]. Handy
+     * for feeding an unquantized index's own vectors to [rerank] instead of keeping a second copy.
+     */
+    public fun vectorOf(key: K): FloatArray? {
+        val id = idOf[key] ?: return null
+        return hnsw.store().reconstruct(id)
+    }
+
+    /**
+     * Rebuilds the graph over the live entries only, dropping every tombstone left by [remove] and by
+     * re-[add]ing an existing key.
+     *
+     * Those tombstones are not free: each keeps a vector in memory and stays in the graph as a routing
+     * hop, so a long-lived index over changing data grows and its queries slow down. Compaction is the
+     * reclaim step.
+     *
+     * No vector data is lost or re-approximated: entries are reinserted in their stored form, so
+     * quantized codes come through a rebuild bit-exact. With [Quantization.None] the result is
+     * byte-identical to an index built from the same live entries in the same order. With a quantized
+     * store the new graph is built from those stored vectors where the original build used the
+     * full-precision originals, so its links can differ marginally — the rebuild is deterministic
+     * either way.
+     *
+     * The cost is a full rebuild (comparable to the original build), so call it on churn, not per edit:
+     * a common trigger is `tombstones > size / 2` at app start or after a bulk sync.
+     *
+     * @return the number of reclaimed slots.
+     */
+    public fun compact(): Int {
+        val reclaimed = hnsw.tombstones
+        if (reclaimed == 0) return 0
+
+        val oldStore = hnsw.store()
+        val fresh = Hnsw(dimensions, metric, config)
+        val liveCount = idOf.size
+        val newKeyOf = ArrayList<K?>(liveCount)
+        val newAttrs = ArrayList<Map<String, String>>(liveCount)
+        val newIdOf = HashMap<K, Int>(liveCount * 2)
+
+        // Ascending old id — i.e. insertion order — so the rebuild does not depend on hash iteration
+        // order and stays identical on every platform.
+        for (oldId in 0 until keyOf.size) {
+            val key = keyOf[oldId] ?: continue
+            val newId = fresh.addPrepared(oldStore.reconstruct(oldId))
+            newIdOf[key] = newId
+            newKeyOf.add(key)
+            newAttrs.add(attrsOf[oldId])
+        }
+
+        hnsw = fresh
+        idOf.clear()
+        idOf.putAll(newIdOf)
+        keyOf.clear()
+        keyOf.addAll(newKeyOf)
+        attrsOf.clear()
+        attrsOf.addAll(newAttrs)
+        return reclaimed
+    }
+
+    /** Removes every entry and releases the graph. */
+    public fun clear() {
+        hnsw = Hnsw(dimensions, metric, config)
+        idOf.clear()
+        keyOf.clear()
+        attrsOf.clear()
     }
 
     // --- persistence support (accessed by the encode/decode functions in Persistence.kt) ---
@@ -123,6 +225,9 @@ public class VectorIndex<K> private constructor(
 
     /** Live key -> internal id, in iteration order. */
     internal fun liveEntries(): Map<K, Int> = idOf
+
+    /** The key at internal [id], or null if that slot is a tombstone. */
+    internal fun keyAt(id: Int): K? = keyOf[id]
 
     internal fun attributesAt(id: Int): Map<String, String> = attrsOf[id]
 

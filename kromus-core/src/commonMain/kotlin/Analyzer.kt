@@ -65,6 +65,7 @@ internal class NgramAnalyzer(private val n: Int) : Analyzer {
     override fun analyze(text: String): List<String> {
         val out = ArrayList<String>()
         val run = StringBuilder()
+
         fun flush() {
             if (run.isEmpty()) return
             if (run.length <= n) {

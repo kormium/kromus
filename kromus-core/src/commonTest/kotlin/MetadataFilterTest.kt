@@ -6,7 +6,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MetadataFilterTest {
-
     @Test
     fun vectorFilterReturnsOnlyMatchingAndFillsK() {
         val dim = 32
@@ -71,11 +70,11 @@ class MetadataFilterTest {
         val q = randomVector(dim, rng)
         val filter: MetadataFilter = { it["g"] == "2" }
         assertEquals(
-            index.search(q, 10, 128, filter),
-            restored.search(q, 10, 128, filter),
+            index.search(q, 10, efSearch = 128, filter = filter),
+            restored.search(q, 10, efSearch = 128, filter = filter),
             "filtered search must match after reload (attributes persisted)",
         )
-        assertTrue(restored.search(q, 10, 128, filter).all { it.key % 4 == 2 })
+        assertTrue(restored.search(q, 10, efSearch = 128, filter = filter).all { it.key % 4 == 2 })
     }
 
     @Test

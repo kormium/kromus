@@ -43,16 +43,29 @@ public class HybridIndex<K> private constructor(
         bm25Config: Bm25Config = Bm25Config(),
         rrfK: Int = Rrf.DEFAULT_K,
     ) : this(
-        dimensions, metric, hnswConfig, analyzer, bm25Config, rrfK,
-        VectorIndex(dimensions, metric, hnswConfig), TextIndex(analyzer, bm25Config), emptySet(),
+        dimensions,
+        metric,
+        hnswConfig,
+        analyzer,
+        bm25Config,
+        rrfK,
+        VectorIndex(dimensions, metric, hnswConfig),
+        TextIndex(analyzer, bm25Config),
+        emptySet(),
     )
 
-    private val keys = HashSet<K>(initialKeys)
+    private val liveKeys = HashSet<K>(initialKeys)
 
     /** Number of live entries. */
-    public val size: Int get() = keys.size
+    public val size: Int get() = liveKeys.size
 
-    public operator fun contains(key: K): Boolean = key in keys
+    /** Slots held by removed or replaced vectors; see [VectorIndex.tombstones] and [compact]. */
+    public val tombstones: Int get() = vectorIndex.tombstones
+
+    /** The live keys. Read-only; do not retain across edits. */
+    public val keys: Set<K> get() = liveKeys
+
+    public operator fun contains(key: K): Boolean = key in liveKeys
 
     /**
      * Adds or replaces the entry [key] with its [vector] and [text]. Optional [attributes] are stored
@@ -61,15 +74,42 @@ public class HybridIndex<K> private constructor(
     public fun add(key: K, vector: FloatArray, text: String, attributes: Map<String, String> = emptyMap()) {
         vectorIndex.add(key, vector, attributes)
         textIndex.add(key, text, attributes)
-        keys.add(key)
+        liveKeys.add(key)
     }
 
     /** Removes [key] from both modalities. @return true if it was present. */
     public fun remove(key: K): Boolean {
-        val removed = keys.remove(key)
+        val removed = liveKeys.remove(key)
         vectorIndex.remove(key)
         textIndex.remove(key)
         return removed
+    }
+
+    /**
+     * Replaces the [attributes][add] of [key] on both modalities without re-indexing it — no new
+     * vector node, no tombstone. See [VectorIndex.updateAttributes].
+     *
+     * @return true if [key] was present.
+     */
+    public fun updateAttributes(key: K, attributes: Map<String, String>): Boolean {
+        val updated = vectorIndex.updateAttributes(key, attributes)
+        textIndex.updateAttributes(key, attributes)
+        return updated
+    }
+
+    /**
+     * Rebuilds the vector graph over the live entries only, reclaiming the tombstones left by removals
+     * and replacements. The text side never accumulates any. See [VectorIndex.compact].
+     *
+     * @return the number of reclaimed slots.
+     */
+    public fun compact(): Int = vectorIndex.compact()
+
+    /** Removes every entry from both modalities. */
+    public fun clear() {
+        liveKeys.clear()
+        vectorIndex.clear()
+        textIndex.clear()
     }
 
     /**
@@ -78,6 +118,7 @@ public class HybridIndex<K> private constructor(
      * @param candidates how many hits to pull from each retriever before fusion. Larger widens the
      *   pool RRF can draw from (better recall) at some cost; defaults to a multiple of [k].
      * @param efSearch vector-search breadth; see [VectorIndex.search].
+     * @param maxVisited traversal budget for the vector retriever; see [HnswConfig.maxVisited].
      * @param filter optional predicate over each entry's [attributes][add]; applied to both retrievers.
      */
     public fun search(
@@ -86,10 +127,11 @@ public class HybridIndex<K> private constructor(
         k: Int,
         candidates: Int = maxOf(k * 4, 50),
         efSearch: Int = hnswConfig.efSearch,
+        maxVisited: Int = hnswConfig.maxVisited,
         filter: MetadataFilter? = null,
     ): List<SearchResult<K>> {
         require(k >= 1) { "k must be >= 1, was $k" }
-        val vectorHits = vectorIndex.search(vector, candidates, efSearch, filter).map { it.key }
+        val vectorHits = vectorIndex.search(vector, candidates, efSearch, maxVisited, filter).map { it.key }
         val textHits = textIndex.search(text, candidates, filter).map { it.key }
         return Rrf.fuse(listOf(vectorHits, textHits), limit = k, k = rrfK)
     }
@@ -99,8 +141,9 @@ public class HybridIndex<K> private constructor(
         vector: FloatArray,
         k: Int,
         efSearch: Int = hnswConfig.efSearch,
+        maxVisited: Int = hnswConfig.maxVisited,
         filter: MetadataFilter? = null,
-    ): List<SearchResult<K>> = vectorIndex.search(vector, k, efSearch, filter)
+    ): List<SearchResult<K>> = vectorIndex.search(vector, k, efSearch, maxVisited, filter)
 
     /** Text-only (BM25) retrieval, bypassing fusion. */
     public fun searchText(text: String, k: Int, filter: MetadataFilter? = null): List<SearchResult<K>> =
@@ -123,8 +166,15 @@ public class HybridIndex<K> private constructor(
             vectorIndex: VectorIndex<K>,
             textIndex: TextIndex<K>,
         ): HybridIndex<K> = HybridIndex(
-            dimensions, metric, hnswConfig, analyzer, bm25Config, rrfK,
-            vectorIndex, textIndex, vectorIndex.liveEntries().keys.toHashSet(),
+            dimensions,
+            metric,
+            hnswConfig,
+            analyzer,
+            bm25Config,
+            rrfK,
+            vectorIndex,
+            textIndex,
+            vectorIndex.liveEntries().keys.toHashSet(),
         )
     }
 }

@@ -24,6 +24,14 @@ internal interface VectorStore {
     fun distanceToQuery(query: FloatArray, id: Int): Float
 
     fun distanceBetween(a: Int, b: Int): Float
+
+    /**
+     * Reads a stored vector back as floats — exact for full precision, dequantized otherwise. The
+     * result is in *stored* form (already normalized for [Metric.Cosine]), so feeding it back through
+     * [Hnsw.addPrepared] reproduces the identical stored representation. That is what makes
+     * [VectorIndex.compact] lossless.
+     */
+    fun reconstruct(id: Int): FloatArray
 }
 
 /** Shared metric math over two float vectors. */
@@ -67,6 +75,8 @@ internal class Float32VectorStore(
 
     override fun distanceBetween(a: Int, b: Int): Float = metricDistance(vectors[a], vectors[b], metric)
 
+    override fun reconstruct(id: Int): FloatArray = vectors[id].copyOf()
+
     fun vectorAt(id: Int): FloatArray = vectors[id]
 
     /** Restores a stored vector verbatim (persistence). */
@@ -76,7 +86,14 @@ internal class Float32VectorStore(
     }
 }
 
-/** 8-bit symmetric scalar quantization with a per-vector scale (~4× smaller than [Float32VectorStore]). */
+/**
+ * 8-bit symmetric scalar quantization with a per-vector scale (~4× smaller than [Float32VectorStore]).
+ *
+ * Note for [Metric.Cosine]: the dequantized vector is no longer exactly unit length, so the reported
+ * distance is the inner product against it rather than a true cosine. The bias is small and uniform
+ * enough not to disturb ranking, but scores are marginally off the exact cosine — re-rank with
+ * [rerank] when the score value itself matters, not just the order.
+ */
 internal class Int8VectorStore(
     override val dimensions: Int,
     override val metric: Metric,
@@ -152,6 +169,12 @@ internal class Int8VectorStore(
         }
     }
 
+    override fun reconstruct(id: Int): FloatArray {
+        val code = codes[id]
+        val scale = scales[id]
+        return FloatArray(dimensions) { code[it].toInt() * scale }
+    }
+
     fun codeAt(id: Int): ByteArray = codes[id]
 
     fun scaleAt(id: Int): Float = scales[id]
@@ -168,6 +191,12 @@ internal class Int8VectorStore(
  * 1-bit-per-dimension quantization: each component is reduced to its sign (~32× smaller). Stored
  * vectors are compared with Hamming distance (packed 64-bit words + popcount); the full-precision
  * query is compared against the ±1 sign vector directly (asymmetric).
+ *
+ * Reducing a vector to its signs discards magnitude entirely, which collapses the metrics: all three
+ * rank by agreement with the query's signs, so [Metric.DotProduct] loses the magnitude semantics that
+ * distinguish it and behaves like [Metric.Cosine]. Pick the metric that suits your data anyway (it
+ * still governs the scores you get back and any later re-rank), but do not expect binary quantization
+ * to preserve inner-product ranking.
  */
 internal class BinaryVectorStore(
     override val dimensions: Int,
@@ -191,26 +220,72 @@ internal class BinaryVectorStore(
     private fun signAt(bits: LongArray, i: Int): Float =
         if ((bits[i ushr 6] ushr (i and 63)) and 1L == 1L) 1f else -1f
 
-    override fun distanceToQuery(query: FloatArray, id: Int): Float {
+    // --- asymmetric query path ---
+    //
+    // Every query distance is q · s against a stored ±1 vector. Walking that per dimension — extract
+    // the bit, branch, multiply — costs as much as a full float dot product, which would leave binary
+    // quantization slower than the precision it is meant to trade away. Instead note that
+    // `q · s = 2 * (sum of q over the set bits) - (sum of q)`: only the set-bit sum depends on the
+    // stored vector, and that sum is table-driven. The query is preprocessed once per search into
+    // per-nibble partial sums, after which each stored vector costs one lookup per 4 dimensions.
+    //
+    // The table is rebuilt whenever a different query array arrives — identity, not equality, because
+    // a search hands the same prepared array to every distance call.
+
+    private val nibbles = (dimensions + 3) ushr 2
+    private var lutQuery: FloatArray? = null
+    private var lut = FloatArray(0)
+    private var lutQuerySum = 0f
+    private var lutQueryNormSquared = 0f
+
+    private fun ensureLut(query: FloatArray) {
+        if (lutQuery === query) return
+        if (lut.size < nibbles * 16) lut = FloatArray(nibbles * 16)
+
+        var sum = 0f
+        for (n in 0 until nibbles) {
+            val base = n shl 4
+            val offset = n shl 2
+            lut[base] = 0f
+            // Each pattern is the previous one with its lowest set bit added back, so building the
+            // table costs one addition per entry.
+            for (pattern in 1 until 16) {
+                val lowest = pattern and -pattern
+                val dimension = offset + lowest.countTrailingZeroBits()
+                val q = if (dimension < dimensions) query[dimension] else 0f
+                lut[base + pattern] = lut[base + (pattern xor lowest)] + q
+            }
+            sum += lut[base + 15]
+        }
+        var normSquared = 0f
+        for (i in 0 until dimensions) normSquared += query[i] * query[i]
+
+        lutQuerySum = sum
+        lutQueryNormSquared = normSquared
+        lutQuery = query
+    }
+
+    /** `q · s` for the stored sign vector [id], through the query's nibble table. */
+    private fun dotWithQuery(id: Int): Float {
         val bits = codes[id]
+        var setBitSum = 0f
+        for (n in 0 until nibbles) {
+            val pattern = ((bits[n ushr 4] ushr ((n and 15) shl 2)) and 0xFL).toInt()
+            setBitSum += lut[(n shl 4) + pattern]
+        }
+        return 2f * setBitSum - lutQuerySum
+    }
+
+    override fun distanceToQuery(query: FloatArray, id: Int): Float {
+        ensureLut(query)
+        val dot = dotWithQuery(id)
         return when (metric) {
-            Metric.Cosine -> {
-                var dot = 0f
-                for (i in 0 until dimensions) dot += query[i] * signAt(bits, i)
-                1f - dot * invSqrtDim
-            }
-            Metric.DotProduct -> {
-                var dot = 0f
-                for (i in 0 until dimensions) dot += query[i] * signAt(bits, i)
-                -dot
-            }
+            Metric.Cosine -> 1f - dot * invSqrtDim
+            Metric.DotProduct -> -dot
+            // |q - s|² = |q|² - 2 q·s + |s|², and |s|² is the dimension count for a ±1 vector.
             Metric.Euclidean -> {
-                var acc = 0f
-                for (i in 0 until dimensions) {
-                    val d = query[i] - signAt(bits, i)
-                    acc += d * d
-                }
-                sqrt(acc)
+                val squared = lutQueryNormSquared - 2f * dot + dimensions
+                if (squared <= 0f) 0f else sqrt(squared)
             }
         }
     }
@@ -226,6 +301,11 @@ internal class BinaryVectorStore(
             Metric.DotProduct -> (2 * hamming - dimensions).toFloat()
             Metric.Euclidean -> sqrt(4f * hamming)
         }
+    }
+
+    override fun reconstruct(id: Int): FloatArray {
+        val bits = codes[id]
+        return FloatArray(dimensions) { signAt(bits, it) }
     }
 
     fun codeAt(id: Int): LongArray = codes[id]
