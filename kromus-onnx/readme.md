@@ -112,7 +112,7 @@ embedder.embedDocument("Kotlin coroutines guide") // passage: …
 Pre-1.0, part of the kromus suite. Shared layer runs on every target, with `OnnxSession` backends for
 JVM, Android, web (Kotlin/JS + Wasm), iOS and desktop-native (via `CallbackOnnxSession`; an opt-in ORT
 C cinterop is provided too). All Kotlin backends verified to compile here; full inference runs in your
-app against a real model. `implementation("io.github.kormium:kromus-onnx:0.14.0")`.
+app against a real model. `implementation("io.github.kormium:kromus-onnx:0.15.0")`.
 
 ## License
 

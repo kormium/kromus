@@ -15,7 +15,7 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.14.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> **Status:** `0.15.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
 > metadata filters, pluggable analyzers, full-precision re-rank, graph compaction, an optional kemus
 > storage adapter and an optional `kromus-onnx` embedder are usable today; the API may still change
 > before 1.0. See the [changelog](CHANGELOG.md) for what has moved and the roadmap for what's next.
@@ -42,12 +42,12 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.14.0")
+        implementation("io.github.kormium:kromus-core:0.15.0")
 
         // Optional companion modules — see their own readmes for details.
-        implementation("io.github.kormium:kromus-kemus:0.14.0") // persist into a kemus store
-        implementation("io.github.kormium:kromus-onnx:0.14.0")  // on-device text embedder
-        implementation("io.github.kormium:kromus-sync:0.14.0")  // keep an index fresh from a Flow
+        implementation("io.github.kormium:kromus-kemus:0.15.0") // persist into a kemus store
+        implementation("io.github.kormium:kromus-onnx:0.15.0")  // on-device text embedder
+        implementation("io.github.kormium:kromus-sync:0.15.0")  // keep an index fresh from a Flow
     }
 }
 ```
