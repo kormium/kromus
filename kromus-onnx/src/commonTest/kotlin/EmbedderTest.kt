@@ -1,12 +1,12 @@
 package io.github.kromus.onnx
 
+import kotlinx.coroutines.test.runTest
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.coroutines.test.runTest
 
 /** A deterministic OnnxSession — token i's vector is all `(i+1)` — so the pipeline is testable without a real model. */
 private class FakeOnnxSession(private val hidden: Int) : OnnxSession {

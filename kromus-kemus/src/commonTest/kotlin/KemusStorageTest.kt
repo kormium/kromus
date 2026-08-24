@@ -6,12 +6,12 @@ import io.github.kromus.HybridIndex
 import io.github.kromus.KeyCodec
 import io.github.kromus.Metric
 import io.github.kromus.VectorIndex
+import kotlinx.coroutines.test.runTest
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.test.runTest
 
 class KemusStorageTest {
 

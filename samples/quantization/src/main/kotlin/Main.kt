@@ -1,11 +1,9 @@
 package io.github.kromus.samples.quantization
 
 import io.github.kromus.HnswConfig
-import io.github.kromus.KeyCodec
 import io.github.kromus.Metric
 import io.github.kromus.Quantization
 import io.github.kromus.VectorIndex
-import io.github.kromus.encodeToByteArray
 import io.github.kromus.rerank
 import kotlin.random.Random
 
@@ -26,8 +24,10 @@ fun main() {
     // Stand in for 750 document embeddings from a real model, in 15 topical clusters.
     val embeddings = ArrayList<FloatArray>()
     val clusterCenters = List(15) { FloatArray(dimensions) { rng.nextFloat() * 2f - 1f } }
-    for (center in clusterCenters) repeat(50) {
-        embeddings.add(FloatArray(dimensions) { center[it] + (rng.nextFloat() * 2f - 1f) * 0.10f })
+    for (center in clusterCenters) {
+        repeat(50) {
+            embeddings.add(FloatArray(dimensions) { center[it] + (rng.nextFloat() * 2f - 1f) * 0.10f })
+        }
     }
 
     val binary = VectorIndex<Int>(dimensions, Metric.Cosine, HnswConfig(quantization = Quantization.Binary))
@@ -35,7 +35,8 @@ fun main() {
 
     val floatVectorKb = embeddings.size * dimensions * 4 / 1024
     val binaryVectorKb = embeddings.size * ((dimensions + 7) / 8) / 1024
-    println("Vector memory: full precision ≈ ${floatVectorKb} KB,  binary ≈ ${binaryVectorKb} KB  (~${floatVectorKb / binaryVectorKb}× smaller)\n")
+    val shrink = floatVectorKb / binaryVectorKb
+    println("Vector memory: full precision ≈ $floatVectorKb KB, binary ≈ $binaryVectorKb KB (~$shrink× smaller)\n")
 
     // A query near cluster #3 (its documents are ids 150..199).
     val query = FloatArray(dimensions) { clusterCenters[3][it] + (rng.nextFloat() * 2f - 1f) * 0.10f }

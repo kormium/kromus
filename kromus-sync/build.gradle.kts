@@ -54,13 +54,13 @@ kotlin {
             dependencies {
                 // Index types appear in the public API; Flow does too (the sync source).
                 api(project(":kromus-core"))
-                api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+                api(libs.kotlinx.coroutines.core)
             }
         }
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+                implementation(libs.kotlinx.coroutines.test)
             }
         }
     }

@@ -46,6 +46,7 @@ public class WordPieceTokenizer(
     private fun basicTokenize(text: String): List<String> {
         val out = ArrayList<String>()
         val token = StringBuilder()
+
         fun flush() { if (token.isNotEmpty()) { out.add(token.toString()); token.setLength(0) } }
         for (ch in text) {
             val c = if (doLowerCase) ch.lowercaseChar() else ch

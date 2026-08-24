@@ -53,13 +53,13 @@ kotlin {
         val commonMain by getting {
             dependencies {
                 api(project(":kromus-core"))
-                api("io.github.kormium:kemus-core:0.2.0")
+                api(libs.kemus.core)
             }
         }
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+                implementation(libs.kotlinx.coroutines.test)
             }
         }
     }

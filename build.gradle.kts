@@ -7,19 +7,33 @@ buildscript {
     }
     dependencies {
         // Kotlin Gradle plugin for all modules (they apply kotlin("multiplatform") without a version).
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0")
+        classpath(libs.kotlin.gradle.plugin)
         // Android Gradle plugin for the modules that declare an android target via the AGP KMP
         // library plugin (on-device search is a first-class Android/iOS use case).
-        classpath("com.android.tools.build:gradle:9.2.1")
+        classpath(libs.android.gradle.plugin)
     }
 }
 
 plugins {
     // Applied to the publishable library subprojects below (not to the root itself).
-    id("com.vanniktech.maven.publish") version "0.36.0" apply false
+    alias(libs.plugins.vanniktech.publish) apply false
     // Locks the public ABI of the stable core (JVM + klib). Changes require `./gradlew apiDump`
     // and a review of the .api diffs.
-    id("org.jetbrains.kotlinx.binary-compatibility-validator") version "0.18.1"
+    alias(libs.plugins.binary.compatibility.validator)
+    // Formatting, applied to every module below. `./gradlew ktlintFormat` fixes, `ktlintCheck`
+    // verifies (and runs as part of `check`). Rules are configured in .editorconfig.
+    alias(libs.plugins.ktlint)
+}
+
+val ktlintVersion = libs.versions.ktlint
+
+allprojects {
+    apply(plugin = "org.jlleitschuh.gradle.ktlint")
+
+    extensions.configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
+        version.set(ktlintVersion)
+        filter { exclude("**/build/**") }
+    }
 }
 
 apiValidation {
@@ -31,8 +45,16 @@ apiValidation {
     // surfaces still move; the samples are apps, not API.
     ignoredProjects.addAll(
         listOf(
-            "kromus-onnx", "kromus-kemus", "kromus-sync",
-            "common", "quickstart", "hybrid", "quantization", "sync", "onnx",
+            "kromus-onnx",
+            "kromus-kemus",
+            "kromus-sync",
+            "common",
+            "quickstart",
+            "hybrid",
+            "quantization",
+            "sync",
+            "onnx",
+            "benchmarks",
         ),
     )
 }
@@ -60,7 +82,8 @@ val iosSimulatorTestsEnabled: Boolean by lazy {
         "false" -> false
         else -> runCatching {
             val process = ProcessBuilder("xcrun", "simctl", "list", "runtimes")
-                .redirectErrorStream(true).start()
+                .redirectErrorStream(true)
+                .start()
             val output = process.inputStream.bufferedReader().readText()
             process.waitFor()
             output.lineSequence().any { it.contains("iOS") }
@@ -86,18 +109,26 @@ val publishableModules = setOf(
 
 val moduleDescriptions = mapOf(
     "kromus-core" to
-        ("kromus — an embedded, reflection-free Kotlin Multiplatform hybrid search engine: a pure-Kotlin " +
-            "HNSW vector index with a full-text/BM25 layer and RRF hybrid queries, quantization, metadata " +
-            "filters and binary persistence, running on JVM, Android, iOS, Native and the web (Wasm)."),
+        (
+            "kromus — an embedded, reflection-free Kotlin Multiplatform hybrid search engine: a pure-Kotlin " +
+                "HNSW vector index with a full-text/BM25 layer and RRF hybrid queries, quantization, metadata " +
+                "filters and binary persistence, running on JVM, Android, iOS, Native and the web (Wasm)."
+        ),
     "kromus-kemus" to
-        ("kromus-kemus — an optional kromus adapter that persists a vector/full-text index into a kemus " +
-            "store (embedded, offline-first, with online sync)."),
+        (
+            "kromus-kemus — an optional kromus adapter that persists a vector/full-text index into a kemus " +
+                "store (embedded, offline-first, with online sync)."
+        ),
     "kromus-onnx" to
-        ("kromus-onnx — a text embedder for kromus: one common-code pipeline (WordPiece tokenizer, " +
-            "pooling, L2 normalization) with pluggable ONNX Runtime backends on every target."),
+        (
+            "kromus-onnx — a text embedder for kromus: one common-code pipeline (WordPiece tokenizer, " +
+                "pooling, L2 normalization) with pluggable ONNX Runtime backends on every target."
+        ),
     "kromus-sync" to
-        ("kromus-sync — keeps a kromus index fresh from a Flow<List<T>> snapshot stream, reconciling " +
-            "added/changed/removed entries with no data-layer dependency."),
+        (
+            "kromus-sync — keeps a kromus index fresh from a Flow<List<T>> snapshot stream, reconciling " +
+                "added/changed/removed entries with no data-layer dependency."
+        ),
 )
 
 subprojects {
