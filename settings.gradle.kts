@@ -7,6 +7,8 @@ pluginManagement {
 }
 
 plugins {
+    // Version pinned here rather than in gradle/libs.versions.toml: settings plugins are resolved
+    // before the version catalog exists.
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
 }
 
@@ -34,6 +36,10 @@ include(
     "samples:sync",
     "samples:onnx",
 )
+
+// benchmarks — recall against exact search, latency, quantization trade-offs, the cost of churn.
+// A JVM app rather than a test: it takes minutes at realistic sizes. `./gradlew :benchmarks:run`.
+include("benchmarks")
 
 // kromus-kemus — optional adapter that persists an index into a kemus store (embedded / offline /
 // online sync). Depends on io.github.kormium:kemus-core, published to Maven Central.
