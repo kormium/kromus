@@ -1,21 +1,30 @@
 package io.github.kromus
 
 // Compact, zero-dependency binary persistence for the indexes. Building an HNSW graph is expensive;
-// these let you build once and reload instantly (ship a prebuilt index, or cache it on device). The
-// format is versioned by a leading tag byte and is stable across platforms (floats are stored by raw
-// bits). Analyzers are functions and cannot be serialized, so text/hybrid loaders take the analyzer
-// the index was built with — supply the same one for consistent query tokenization.
+// these let you build once and reload instantly (ship a prebuilt index, or cache it on device).
+//
+// Every blob starts with a "KRMS" magic, a kind byte and a format version (see ByteBuffers.kt), and
+// every read is bounds-checked, so stale or corrupt bytes surface as a KromusFormatException the
+// caller can catch and rebuild from — not as a crash.
+//
+// The bytes are stable across platforms twice over: floats are stored by raw bits, and records are
+// written in a fixed order (vector entries by internal id, documents by insertion order) rather than
+// in hash-map iteration order, so encoding the same index content anywhere yields the same bytes.
+// That makes an index safe to content-hash, cache by digest and compare in tests.
+//
+// Analyzers are functions and cannot be serialized, so text/hybrid loaders take the analyzer the
+// index was built with — supply the same one for consistent query tokenization.
 
-private const val VECTOR_FORMAT: Int = 3
-private const val TEXT_FORMAT: Int = 2
-private const val HYBRID_FORMAT: Int = 1
+private const val VECTOR_FORMAT: Int = 4
+private const val TEXT_FORMAT: Int = 3
+private const val HYBRID_FORMAT: Int = 2
 
 /** Serializes this vector index (graph + key mapping) to a byte array. */
 public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
     val g = graph()
     val store = g.store()
     val w = ByteWriter()
-    w.byte(VECTOR_FORMAT)
+    w.header(KIND_VECTOR, VECTOR_FORMAT)
     w.int(dimensions)
     w.byte(metric.ordinal)
     w.int(config.m)
@@ -23,6 +32,7 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
     w.int(config.efSearch)
     w.long(config.seed)
     w.byte(config.quantization.ordinal)
+    w.int(config.maxVisited)
 
     val n = g.capacity
     w.int(n)
@@ -42,42 +52,66 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
         for (layer in 0..level) {
             val neighbors = g.neighborsAtLayer(id, layer)
             w.int(neighbors.size)
-            for (e in neighbors) w.int(e)
+            for (i in 0 until neighbors.size) w.int(neighbors[i])
         }
     }
     w.int(g.entryPointValue)
     w.int(g.topLayerValue)
 
-    val live = liveEntries()
-    w.int(live.size)
-    for ((key, id) in live) {
-        w.bytes(keyCodec.encode(key))
-        w.int(id)
+    // Live entries in ascending id order, with attribute strings pooled. The records go into their
+    // own writer first because the pool has to precede them in the file but is only complete once
+    // every record has been walked.
+    val pool = StringPoolWriter()
+    val entries = ByteWriter()
+    var liveCount = 0
+    for (id in 0 until n) {
+        val key = keyAt(id) ?: continue
+        liveCount++
+        entries.bytes(keyCodec.encode(key))
+        entries.int(id)
         val attrs = attributesAt(id)
-        w.int(attrs.size)
+        entries.int(attrs.size)
         for ((ak, av) in attrs) {
-            w.bytes(ak.encodeToByteArray())
-            w.bytes(av.encodeToByteArray())
+            entries.int(pool.idOf(ak))
+            entries.int(pool.idOf(av))
         }
     }
+    pool.writeTo(w)
+    w.int(liveCount)
+    w.raw(entries.toByteArray())
     return w.toByteArray()
 }
 
-/** Reconstructs a vector index produced by [encodeToByteArray]. */
+/**
+ * Reconstructs a vector index produced by [encodeToByteArray].
+ *
+ * @throws KromusFormatException if [bytes] are not a vector index this build can read.
+ */
 public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): VectorIndex<K> {
     val r = ByteReader(bytes)
-    require(r.byte() == VECTOR_FORMAT) { "unsupported vector index format" }
+    r.header(KIND_VECTOR, VECTOR_FORMAT)
     val dimensions = r.int()
-    val metric = Metric.entries[r.byte()]
-    val config = HnswConfig(r.int(), r.int(), r.int(), r.long(), Quantization.entries[r.byte()])
+    if (dimensions < 1) throw KromusFormatException("corrupt kromus index: dimensions $dimensions")
+    val metric = r.enumValue(Metric.entries, "metric")
+    val config = HnswConfig(
+        m = r.int(),
+        efConstruction = r.int(),
+        efSearch = r.int(),
+        seed = r.long(),
+        quantization = r.enumValue(Quantization.entries, "quantization"),
+        maxVisited = r.int(),
+    )
 
     val store = Hnsw.newStore(dimensions, metric, config.quantization)
-    val n = r.int()
+    // Each node costs at least a level, a deleted flag, one neighbour count and its vector payload.
+    val n = r.count(bytesPerNode(dimensions, config.quantization), "node")
     val levels = IntArray(n)
     val deleted = BooleanArray(n)
     val neighbors = ArrayList<Array<IntArray>>(n)
     for (id in 0 until n) {
-        levels[id] = r.int()
+        val level = r.int()
+        if (level < 0) throw KromusFormatException("corrupt kromus index: negative level $level for node $id")
+        levels[id] = level
         when (store) {
             is Float32VectorStore -> store.load(FloatArray(dimensions) { r.float() })
             is Int8VectorStore -> store.load(ByteArray(dimensions) { r.byte().toByte() }, r.float())
@@ -85,24 +119,41 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
             else -> error("unknown vector store")
         }
         deleted[id] = r.byte() == 1
-        neighbors.add(Array(levels[id] + 1) { IntArray(r.int()) { r.int() } })
+        neighbors.add(
+            Array(level + 1) {
+                val links = IntArray(r.count(4, "neighbour")) { r.int() }
+                for (link in links) {
+                    if (link < 0 || link >= n) {
+                        throw KromusFormatException("corrupt kromus index: neighbour $link outside 0..${n - 1}")
+                    }
+                }
+                links
+            },
+        )
     }
     val entryPoint = r.int()
+    if (entryPoint < -1 || entryPoint >= n) {
+        throw KromusFormatException("corrupt kromus index: entry point $entryPoint outside 0..${n - 1}")
+    }
     val topLayer = r.int()
 
-    val liveCount = r.int()
+    val pool = StringPoolReader(r)
+    val liveCount = r.count(8, "entry")
     val live = HashMap<K, Int>(liveCount * 2)
     val liveAttrs = HashMap<Int, Map<String, String>>()
     repeat(liveCount) {
         val key = keyCodec.decode(r.bytes())
         val id = r.int()
+        if (id < 0 || id >= n) {
+            throw KromusFormatException("corrupt kromus index: entry id $id outside 0..${n - 1}")
+        }
         live[key] = id
-        val attrCount = r.int()
+        val attrCount = r.count(8, "attribute")
         if (attrCount > 0) {
             val attrs = HashMap<String, String>(attrCount * 2)
             repeat(attrCount) {
-                val ak = r.bytes().decodeToString()
-                attrs[ak] = r.bytes().decodeToString()
+                val ak = pool.get(r.int())
+                attrs[ak] = pool.get(r.int())
             }
             liveAttrs[id] = attrs
         }
@@ -112,35 +163,54 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
     return VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n)
 }
 
+/** Lower bound on the bytes one persisted node occupies, used to reject absurd node counts. */
+private fun bytesPerNode(dimensions: Int, quantization: Quantization): Int {
+    val vector = when (quantization) {
+        Quantization.None -> 4 * dimensions
+        Quantization.Int8 -> dimensions + 4
+        Quantization.Binary -> 8 * ((dimensions + 63) ushr 6)
+    }
+    // level + deleted flag + the layer-0 neighbour count.
+    return vector + 4 + 1 + 4
+}
+
 /** Serializes this full-text index to a byte array. The analyzer is not stored (see [decodeTextIndex]). */
 public fun <K> TextIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
     val w = ByteWriter()
-    w.byte(TEXT_FORMAT)
+    w.header(KIND_TEXT, TEXT_FORMAT)
     w.float(config.k1)
     w.float(config.b)
 
+    // Terms and attribute strings are pooled: a term is repeated in every document that contains it,
+    // which is otherwise the bulk of the file.
+    val pool = StringPoolWriter()
+    val entries = ByteWriter()
     val docs = snapshot()
-    w.int(docs.size)
     for (doc in docs) {
-        w.bytes(keyCodec.encode(doc.key))
-        w.int(doc.length)
-        w.int(doc.termFreqs.size)
+        entries.bytes(keyCodec.encode(doc.key))
+        entries.int(doc.length)
+        entries.int(doc.termFreqs.size)
         for ((term, freq) in doc.termFreqs) {
-            w.bytes(term.encodeToByteArray())
-            w.int(freq)
+            entries.int(pool.idOf(term))
+            entries.int(freq)
         }
-        w.int(doc.attributes.size)
+        entries.int(doc.attributes.size)
         for ((ak, av) in doc.attributes) {
-            w.bytes(ak.encodeToByteArray())
-            w.bytes(av.encodeToByteArray())
+            entries.int(pool.idOf(ak))
+            entries.int(pool.idOf(av))
         }
     }
+    pool.writeTo(w)
+    w.int(docs.size)
+    w.raw(entries.toByteArray())
     return w.toByteArray()
 }
 
 /**
  * Reconstructs a full-text index produced by [encodeToByteArray]. Pass the same [analyzer] the index
  * was built with so queries tokenize consistently with the stored terms.
+ *
+ * @throws KromusFormatException if [bytes] are not a text index this build can read.
  */
 public fun <K> decodeTextIndex(
     bytes: ByteArray,
@@ -148,25 +218,27 @@ public fun <K> decodeTextIndex(
     analyzer: Analyzer = Analyzer.standard(),
 ): TextIndex<K> {
     val r = ByteReader(bytes)
-    require(r.byte() == TEXT_FORMAT) { "unsupported text index format" }
+    r.header(KIND_TEXT, TEXT_FORMAT)
     val config = Bm25Config(r.float(), r.float())
     val index = TextIndex<K>(analyzer, config)
 
-    val docCount = r.int()
+    val pool = StringPoolReader(r)
+    val docCount = r.count(12, "document")
     repeat(docCount) {
         val key = keyCodec.decode(r.bytes())
         val length = r.int()
-        val termCount = r.int()
+        if (length < 0) throw KromusFormatException("corrupt kromus index: negative document length $length")
+        val termCount = r.count(8, "term")
         val termFreqs = HashMap<String, Int>(termCount * 2)
         repeat(termCount) {
-            val term = r.bytes().decodeToString()
+            val term = pool.get(r.int())
             termFreqs[term] = r.int()
         }
-        val attrCount = r.int()
+        val attrCount = r.count(8, "attribute")
         val attributes = HashMap<String, String>(attrCount * 2)
         repeat(attrCount) {
-            val ak = r.bytes().decodeToString()
-            attributes[ak] = r.bytes().decodeToString()
+            val ak = pool.get(r.int())
+            attributes[ak] = pool.get(r.int())
         }
         index.loadDoc(key, termFreqs, length, attributes)
     }
@@ -176,7 +248,7 @@ public fun <K> decodeTextIndex(
 /** Serializes this hybrid index (both modalities) to a byte array. */
 public fun <K> HybridIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
     val w = ByteWriter()
-    w.byte(HYBRID_FORMAT)
+    w.header(KIND_HYBRID, HYBRID_FORMAT)
     w.int(rrfK)
     w.bytes(vectorPart().encodeToByteArray(keyCodec))
     w.bytes(textPart().encodeToByteArray(keyCodec))
@@ -186,6 +258,8 @@ public fun <K> HybridIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
 /**
  * Reconstructs a hybrid index produced by [encodeToByteArray]. Pass the same [analyzer] used to build
  * it (see [decodeTextIndex]).
+ *
+ * @throws KromusFormatException if [bytes] are not a hybrid index this build can read.
  */
 public fun <K> decodeHybridIndex(
     bytes: ByteArray,
@@ -193,8 +267,9 @@ public fun <K> decodeHybridIndex(
     analyzer: Analyzer = Analyzer.standard(),
 ): HybridIndex<K> {
     val r = ByteReader(bytes)
-    require(r.byte() == HYBRID_FORMAT) { "unsupported hybrid index format" }
+    r.header(KIND_HYBRID, HYBRID_FORMAT)
     val rrfK = r.int()
+    if (rrfK < 1) throw KromusFormatException("corrupt kromus index: rrfK $rrfK")
     val vectorIndex = decodeVectorIndex<K>(r.bytes(), keyCodec)
     val textIndex = decodeTextIndex<K>(r.bytes(), keyCodec, analyzer)
     return HybridIndex.fromParts(

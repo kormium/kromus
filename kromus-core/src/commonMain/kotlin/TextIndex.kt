@@ -25,15 +25,28 @@ public class TextIndex<K>(
     public val analyzer: Analyzer = Analyzer.standard(),
     public val config: Bm25Config = Bm25Config(),
 ) {
-    private class Doc(val termFreqs: Map<String, Int>, val length: Int, val attributes: Map<String, String>)
+    private class Doc(
+        /** Insertion order of this document — the deterministic tie-break for equal BM25 scores. */
+        val ordinal: Int,
+        var termFreqs: Map<String, Int>,
+        val length: Int,
+        var attributes: Map<String, String>,
+    )
 
-    private val docs = HashMap<K, Doc>()
+    // LinkedHashMap so iteration follows insertion order: persistence writes documents in that order
+    // and reloading reproduces the same ordinals, which keeps ranking reproducible across platforms.
+    private val docs = LinkedHashMap<K, Doc>()
+
     // term -> (key -> term frequency in that document)
     private val postings = HashMap<String, HashMap<K, Int>>()
     private var totalLength = 0L
+    private var nextOrdinal = 0
 
     /** Number of indexed documents. */
     public val size: Int get() = docs.size
+
+    /** The indexed keys, in insertion order. Read-only; do not retain across edits. */
+    public val keys: Set<K> get() = docs.keys
 
     public operator fun contains(key: K): Boolean = docs.containsKey(key)
 
@@ -47,11 +60,30 @@ public class TextIndex<K>(
         val termFreqs = HashMap<String, Int>()
         for (t in tokens) termFreqs[t] = (termFreqs[t] ?: 0) + 1
 
-        docs[key] = Doc(termFreqs, tokens.size, attributes)
+        docs[key] = Doc(nextOrdinal++, termFreqs, tokens.size, attributes)
         totalLength += tokens.size
         for ((term, f) in termFreqs) {
             postings.getOrPut(term) { HashMap() }[key] = f
         }
+    }
+
+    /**
+     * Replaces the [attributes][add] stored for [key], leaving the document and its postings alone.
+     *
+     * @return true if [key] was present.
+     */
+    public fun updateAttributes(key: K, attributes: Map<String, String>): Boolean {
+        val doc = docs[key] ?: return false
+        doc.attributes = attributes
+        return true
+    }
+
+    /** Removes every document. */
+    public fun clear() {
+        docs.clear()
+        postings.clear()
+        totalLength = 0L
+        nextOrdinal = 0
     }
 
     /** Removes [key] and drops its postings entirely. @return true if [key] was present. */
@@ -83,8 +115,11 @@ public class TextIndex<K>(
         val k1 = config.k1.toDouble()
         val b = config.b.toDouble()
 
+        // LinkedHashSet, not a HashSet: each document's score accumulates its terms' contributions
+        // in query order, and floating-point addition is not associative — a hash-ordered loop would
+        // produce last-bit differences between platforms, and with them different tie-breaks.
         val scores = HashMap<K, Double>()
-        for (term in queryTerms.toHashSet()) {
+        for (term in LinkedHashSet(queryTerms)) {
             val p = postings[term] ?: continue
             val df = p.size
             val idf = ln(1.0 + (n - df + 0.5) / (df + 0.5))
@@ -95,25 +130,28 @@ public class TextIndex<K>(
                 scores[key] = (scores[key] ?: 0.0) + idf * norm
             }
         }
+        if (scores.isEmpty()) return emptyList()
 
-        return scores.entries
-            .asSequence()
-            .filter { filter == null || filter(docs[it.key]!!.attributes) }
-            .sortedByDescending { it.value }
-            .take(k)
-            .map { SearchResult(it.key, it.value.toFloat()) }
-            .toList()
+        // Bounded selection instead of sorting every scored document: one common term can put the
+        // whole corpus in the map, and k is typically tiny next to it.
+        val top = TopK<K>(if (k < scores.size) k else scores.size)
+        for ((key, score) in scores) {
+            val doc = docs[key]!!
+            if (filter != null && !filter(doc.attributes)) continue
+            top.offer(key, score, doc.ordinal)
+        }
+        return top.toSortedList()
     }
 
     // --- persistence support (accessed by Persistence.kt) ---
 
-    /** One entry per indexed document, carrying everything needed to rebuild it. */
+    /** One entry per indexed document, in insertion order, carrying everything needed to rebuild it. */
     internal fun snapshot(): List<TextEntry<K>> =
         docs.map { (key, doc) -> TextEntry(key, doc.termFreqs, doc.length, doc.attributes) }
 
     /** Reinserts a pre-tokenized document, rebuilding postings without re-running the analyzer. */
     internal fun loadDoc(key: K, termFreqs: Map<String, Int>, length: Int, attributes: Map<String, String>) {
-        docs[key] = Doc(termFreqs, length, attributes)
+        docs[key] = Doc(nextOrdinal++, termFreqs, length, attributes)
         totalLength += length
         for ((term, f) in termFreqs) {
             postings.getOrPut(term) { HashMap() }[key] = f
