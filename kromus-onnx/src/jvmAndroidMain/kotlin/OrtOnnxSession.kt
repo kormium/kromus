@@ -3,9 +3,9 @@ package io.github.kromus.onnx
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import java.nio.LongBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.nio.LongBuffer
 
 /**
  * JVM / Android [OnnxSession] backed by ONNX Runtime for Java (`onnxruntime` on the JVM,
@@ -34,8 +34,24 @@ public class OrtOnnxSession(
         withContext(Dispatchers.Default) {
             val seq = inputIds.size
             val shape = longArrayOf(1, seq.toLong())
-            val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(seq) { inputIds[it].toLong() }), shape)
-            val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(seq) { attentionMask[it].toLong() }), shape)
+            val idsTensor = OnnxTensor.createTensor(
+                env,
+                LongBuffer.wrap(
+                    LongArray(seq) {
+                        inputIds[it].toLong()
+                    },
+                ),
+                shape,
+            )
+            val maskTensor = OnnxTensor.createTensor(
+                env,
+                LongBuffer.wrap(
+                    LongArray(seq) {
+                        attentionMask[it].toLong()
+                    },
+                ),
+                shape,
+            )
             val typeTensor = if (wantsTokenTypes) {
                 OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(seq) { tokenTypeIds[it].toLong() }), shape)
             } else {

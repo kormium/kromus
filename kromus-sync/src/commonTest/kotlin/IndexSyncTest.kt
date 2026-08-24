@@ -36,6 +36,7 @@ class IndexSyncTest {
     @Test
     fun syncToVectorIndexReflectsSnapshotsAndSkipsUnchanged() = runTest {
         val dim = 4
+
         fun v(vararg xs: Float) = floatArrayOf(*xs)
         val index = VectorIndex<String>(dim, Metric.Cosine)
 

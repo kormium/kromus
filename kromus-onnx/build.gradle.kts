@@ -68,13 +68,13 @@ kotlin {
         // await/dispatch too.
         val commonMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+                implementation(libs.kotlinx.coroutines.core)
             }
         }
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+                implementation(libs.kotlinx.coroutines.test)
             }
         }
         // JVM + Android share one backend: onnxruntime and onnxruntime-android expose the same
@@ -83,19 +83,19 @@ kotlin {
         val jvmAndroidMain by creating {
             dependsOn(commonMain)
             dependencies {
-                compileOnly("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+                compileOnly(libs.onnxruntime)
             }
         }
         val jvmMain by getting {
             dependsOn(jvmAndroidMain)
             dependencies {
-                implementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+                implementation(libs.onnxruntime)
             }
         }
         val androidMain by getting {
             dependsOn(jvmAndroidMain)
             dependencies {
-                implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+                implementation(libs.onnxruntime.android)
             }
         }
         // Web (jsMain/wasmJsMain) and Apple (iosMain) backends need only coroutines, inherited from

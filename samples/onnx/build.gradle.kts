@@ -14,7 +14,7 @@ kotlin {
 dependencies {
     implementation(project(":kromus-core"))
     implementation(project(":kromus-onnx"))
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation(libs.kotlinx.coroutines.core)
 }
 
 application {

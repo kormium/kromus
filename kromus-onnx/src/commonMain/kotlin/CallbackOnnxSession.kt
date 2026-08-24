@@ -1,8 +1,8 @@
 package io.github.kromus.onnx
 
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * A model runner shaped as a callback — the framework-free way to plug a platform's ONNX runtime into
