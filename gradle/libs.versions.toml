@@ -11,7 +11,7 @@ onnxruntime = "1.20.0"
 vanniktech-publish = "0.36.0"
 binary-compatibility-validator = "0.18.1"
 foojay-resolver = "0.9.0"
-ktlintGradle = "13.1.0"
+ktlintGradle = "14.2.0"
 ktlint = "1.5.0"
 
 [libraries]
