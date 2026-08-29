@@ -162,8 +162,29 @@ public class VectorIndex<K> private constructor(
             "query has ${query.size} dimensions, expected $dimensions"
         }
         require(k >= 1) { "k must be >= 1, was $k" }
+        return searchWith(null, query, k, efSearch, maxVisited, filter)
+    }
+
+    /**
+     * Runs a search against [scratch] when one is supplied, and against the index's own otherwise.
+     *
+     * A traversal's working state lives in the scratch, so two searches given one each never touch the
+     * same memory — which is what lets [searcher] hand out readers that run at the same time.
+     */
+    internal fun searchWith(
+        scratch: SearchScratch?,
+        query: FloatArray,
+        k: Int,
+        efSearch: Int,
+        maxVisited: Int,
+        filter: MetadataFilter?,
+    ): List<SearchResult<K>> {
         val accept: (Int) -> Boolean = if (filter == null) { { true } } else { { id -> filter(attrsOf[id]) } }
-        val hits = hnsw.query(query, k, efSearch, maxVisited, accept)
+        val hits = if (scratch == null) {
+            hnsw.query(query, k, efSearch, maxVisited, accept)
+        } else {
+            hnsw.query(query, k, efSearch, maxVisited, accept, scratch)
+        }
         val out = ArrayList<SearchResult<K>>(hits.size)
         for (i in 0 until hits.size) {
             val key = keyOf[hits.ids[i]] ?: continue
@@ -171,6 +192,24 @@ public class VectorIndex<K> private constructor(
         }
         return out
     }
+
+    /**
+     * A reader with traversal state of its own, so several can search this index at the same time.
+     *
+     * An ordinary [search] borrows the index's own state, which is why two of them running at once
+     * corrupt each other: the visited marks and candidate heaps are reused between calls, and that
+     * reuse is what makes a query allocate almost nothing. A searcher carries its own, so the index is
+     * merely read during a search and readers do not interact.
+     *
+     * The contract that remains is the index's: **nothing may write to it while a search runs.**
+     * Searchers make reads parallel, not reads-and-writes concurrent — a writer still needs exclusive
+     * access, and `kromus-sync`'s `.concurrent()` wrappers are what arrange that.
+     *
+     * One searcher belongs to one thread or coroutine at a time; sharing a single searcher between two
+     * is exactly the situation it exists to avoid. Give each reader its own, and prefer about as many
+     * as there are physical cores — past that they contend rather than scale.
+     */
+    public fun searcher(): VectorSearcher<K> = VectorSearcher(this)
 
     /**
      * Replaces the [attributes][add] stored for [key] without touching the graph.
