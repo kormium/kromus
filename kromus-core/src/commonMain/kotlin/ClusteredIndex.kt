@@ -82,6 +82,13 @@ public class ClusteredIndex<K> internal constructor(
     internal val store: VectorStore,
     internal val keyOf: List<K>,
     internal val attrsOf: List<Map<String, String>>,
+    /**
+     * Where vectors are read from when the index does not hold them, or null when it does.
+     *
+     * Set by [viewClusteredIndex]: the index keeps its centroids, cluster table and keys resident —
+     * a few megabytes — and reads each probed cluster's vectors as a run when a query needs them.
+     */
+    internal val blocks: VectorBlocks?,
     /** Clusters a query probes unless told otherwise — measured at build time when not set. */
     public val nprobe: Int,
     /**
@@ -146,28 +153,47 @@ public class ClusteredIndex<K> internal constructor(
         k: Int,
         nprobe: Int = this.nprobe,
         filter: MetadataFilter? = null,
-    ): List<SearchResult<K>> {
-        require(query.size == dimensions) { "query has ${query.size} dimensions, expected $dimensions" }
-        require(k >= 1) { "k must be >= 1, was $k" }
-        if (size == 0) return emptyList()
+    ): List<SearchResult<K>> = searcher().search(query, k, nprobe, filter)
 
-        val prepared = prepare(query)
-        val probes = nearestClusters(prepared, if (nprobe > clusterCount) clusterCount else nprobe)
+    /**
+     * A reader that keeps the buffer a streamed search needs, so repeated queries do not each
+     * allocate one.
+     *
+     * For an index that holds its vectors this is a convenience; for one reading them from a file it
+     * matters, because the buffer is a whole cluster wide. One searcher belongs to one thread at a
+     * time — what runs in parallel is *different* searchers, and nothing writes to the index, so any
+     * number of them may.
+     */
+    public fun searcher(): ClusterSearcher<K> = ClusterSearcher(this)
 
-        val top = TopK<K>(k)
-        for (c in probes) {
-            for (id in clusterStarts[c] until clusterStarts[c + 1]) {
-                if (filter != null && !filter(attrsOf[id])) continue
-                val distance = store.distanceToQuery(prepared, id)
-                // TopK keeps the largest, and a smaller distance is a better hit.
-                top.offer(keyOf[id], -distance.toDouble(), id)
-            }
-        }
-        return top.toSortedList().map { SearchResult(it.key, similarityOf((-it.score).toFloat())) }
-    }
+    internal fun similarity(distance: Float): Float = similarityOf(distance)
+
+    internal fun preparedQuery(query: FloatArray): FloatArray = prepare(query)
+
+    internal fun clusterRange(c: Int): IntRange = clusterStarts[c] until clusterStarts[c + 1]
+
+    /** Bytes one stored vector occupies — the fixed stride the layout is built around. */
+    internal val strideBytes: Int get() = vectorBytes(dimensions, config.quantization)
+
+    /** The same index, reading its vectors from [source] rather than holding them. */
+    internal fun streaming(source: VectorBlocks): ClusteredIndex<K> =
+        ClusteredIndex(
+            dimensions,
+            metric,
+            config,
+            centroids,
+            clusterCount,
+            clusterStarts,
+            store,
+            keyOf,
+            attrsOf,
+            source,
+            nprobe,
+            estimatedRecall,
+        )
 
     /** The [nprobe] clusters whose centroids sit closest to [prepared], nearest first. */
-    private fun nearestClusters(prepared: FloatArray, nprobe: Int): IntArray {
+    internal fun nearestClusters(prepared: FloatArray, nprobe: Int): IntArray {
         val distances = FloatArray(clusterCount) {
             Kmeans.distanceToCentroid(prepared, centroids, it * dimensions, dimensions, metric)
         }
@@ -251,8 +277,9 @@ public class ClusteredIndex<K> internal constructor(
                 store,
                 keyOf,
                 attrsOf,
-                measured.first,
-                measured.second,
+                blocks = null,
+                nprobe = measured.first,
+                estimatedRecall = measured.second,
             )
         }
 

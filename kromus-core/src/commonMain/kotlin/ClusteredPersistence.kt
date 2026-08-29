@@ -95,7 +95,21 @@ public fun <K> decodeClusteredIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     expect: String? = null,
-): ClusteredIndex<K> {
+): ClusteredIndex<K> = decodeClusteredIndex(bytes, keyCodec, expect, skipVectors = false).index
+
+/** A decoded index, plus where its vectors sit in the bytes it came from. */
+internal class LoadedClusteredIndex<K>(
+    val index: ClusteredIndex<K>,
+    val vectorsOffset: Int,
+    val vectorsLength: Int,
+)
+
+internal fun <K> decodeClusteredIndex(
+    bytes: ByteArray,
+    keyCodec: KeyCodec<K>,
+    expect: String?,
+    skipVectors: Boolean,
+): LoadedClusteredIndex<K> {
     val c = ContainerReader(bytes, KIND_CLUSTERED, CLUSTERED_FORMAT, expect)
 
     val cfg = c.section(S_CONFIG)
@@ -156,14 +170,18 @@ public fun <K> decodeClusteredIndex(
         }
     }
 
+    // Skipping this is the point of a streamed load: the vectors are the bulk of the file, and a
+    // reader that will page them in a cluster at a time has no reason to inflate them first.
     val store = Hnsw.newStore(dimensions, metric, config.quantization)
-    val vectors = c.section(S_VECTORS)
-    repeat(n) {
-        when (store) {
-            is Float32VectorStore -> store.load(FloatArray(dimensions) { vectors.float() })
-            is Int8VectorStore -> store.load(ByteArray(dimensions) { vectors.byte().toByte() }, vectors.float())
-            is BinaryVectorStore -> store.load(LongArray((dimensions + 63) ushr 6) { vectors.long() })
-            else -> error("unknown vector store")
+    if (!skipVectors) {
+        val vectors = c.section(S_VECTORS)
+        repeat(n) {
+            when (store) {
+                is Float32VectorStore -> store.load(FloatArray(dimensions) { vectors.float() })
+                is Int8VectorStore -> store.load(ByteArray(dimensions) { vectors.byte().toByte() }, vectors.float())
+                is BinaryVectorStore -> store.load(LongArray((dimensions + 63) ushr 6) { vectors.long() })
+                else -> error("unknown vector store")
+            }
         }
     }
 
@@ -186,17 +204,56 @@ public fun <K> decodeClusteredIndex(
         }
     }
 
-    return ClusteredIndex(
-        dimensions,
-        metric,
-        config,
-        centroids,
-        clusterCount,
-        starts,
-        store,
-        keyOf,
-        attrsOf,
-        nprobe,
-        estimatedRecall,
+    return LoadedClusteredIndex(
+        ClusteredIndex(
+            dimensions,
+            metric,
+            config,
+            centroids,
+            clusterCount,
+            starts,
+            store,
+            keyOf,
+            attrsOf,
+            blocks = null,
+            nprobe = nprobe,
+            estimatedRecall = estimatedRecall,
+        ),
+        c.offsetOf(S_VECTORS),
+        c.lengthOf(S_VECTORS),
     )
+}
+
+/**
+ * Loads a clustered index that reads its vectors from [vectors] instead of holding them.
+ *
+ * Everything else — centroids, the cluster table, keys and attributes — is small and stays resident;
+ * on a 50 000-entry index that is a few megabytes against tens for the vectors. Each probed cluster
+ * arrives as one contiguous run when a query needs it, which is the arrangement the whole index type
+ * exists for.
+ *
+ * Pass [vectors] as `null` to read them from [bytes] itself. That is the honest baseline rather than a
+ * saving: the array is still held, so this form is for testing the path and for platforms with no file
+ * to map. The memory is reclaimed only when [vectors] reads from somewhere that is not the heap.
+ *
+ * @throws KromusFormatException if [bytes] are not a clustered index this build can read, or if the
+ *   quantization is [Quantization.Binary], whose query path is a per-query lookup table that a
+ *   byte-scanning copy could only duplicate or silently disagree with — and whose codes are small
+ *   enough that streaming them saves nothing worth the risk.
+ */
+public fun <K> viewClusteredIndex(
+    bytes: ByteArray,
+    keyCodec: KeyCodec<K>,
+    vectors: VectorBlocks? = null,
+    expect: String? = null,
+): ClusteredIndex<K> {
+    val loaded = decodeClusteredIndex(bytes, keyCodec, expect, skipVectors = true)
+    if (!BlockDistance.supports(loaded.index.config.quantization)) {
+        throw KromusFormatException(
+            "a ${loaded.index.config.quantization} clustered index cannot be streamed: its query path " +
+                "is built per query, and its vectors are small enough that there is nothing to reclaim",
+        )
+    }
+    val blocks = vectors ?: ResidentBlocks(bytes, loaded.vectorsOffset, loaded.vectorsLength)
+    return loaded.index.streaming(blocks)
 }

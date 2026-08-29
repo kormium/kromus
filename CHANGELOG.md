@@ -44,6 +44,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   lower index, and a determined re-seed for an emptied group. Without that the layout would vary and
   with it the bytes.
 
+- **`VectorBlocks`** and **`viewClusteredIndex`** — a clustered index can read its vectors a cluster at
+  a time instead of holding them. Each probed cluster is a contiguous run, so it arrives as one read
+  and the distance loop runs over a plain array with no indirection per vector.
+
+  A streamed index returns identical results to a resident one — the byte-scanning distances are a
+  second implementation of the same arithmetic, and a second implementation that disagreed anywhere
+  would return quietly wrong neighbours rather than fail, so the tests hold them to matching score for
+  score across quantizations and metrics.
+
+  The only source today reads from the same array the index was loaded from, which proves the path and
+  saves nothing. Reclaiming the memory needs a source that is not the heap, and that needs the
+  container reader to work over random access rather than a whole `ByteArray` — see #30. Binary
+  quantization is refused: its query path is built per query, and its codes are small enough that
+  there is nothing to reclaim.
+
+- **`ClusterSearcher`** — holds the buffer a streamed cluster is read into, so repeated queries do not
+  each allocate one a whole cluster wide. One per thread; different searchers run in parallel, and
+  nothing writes to the index.
+
 - **`ClusteredIndex.probedClusters`** and **`clusterSize`** — what a query will actually read. Each
   cluster is a contiguous run, so the probe list *is* the read plan; useful for sizing a cache and for
   measuring a file-backed index without assuming clusters are evenly sized, which k-means never

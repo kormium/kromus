@@ -55,6 +55,11 @@ public final class io/github/kromus/ClusterEntry {
 	public final fun getVector ()[F
 }
 
+public final class io/github/kromus/ClusterSearcher {
+	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/ClusterSearcher;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
 public final class io/github/kromus/ClusteredIndex {
 	public static final field Companion Lio/github/kromus/ClusteredIndex$Companion;
 	public final fun attributesOf (Ljava/lang/Object;)Ljava/util/Map;
@@ -72,6 +77,7 @@ public final class io/github/kromus/ClusteredIndex {
 	public static synthetic fun probedClusters$default (Lio/github/kromus/ClusteredIndex;[FIILjava/lang/Object;)[I
 	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/ClusteredIndex;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+	public final fun searcher ()Lio/github/kromus/ClusterSearcher;
 }
 
 public final class io/github/kromus/ClusteredIndex$Companion {
@@ -84,6 +90,8 @@ public final class io/github/kromus/ClusteredPersistenceKt {
 	public static synthetic fun decodeClusteredIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
 	public static final fun encodeToByteArray (Lio/github/kromus/ClusteredIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
 	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/ClusteredIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+	public static final fun viewClusteredIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;)Lio/github/kromus/ClusteredIndex;
+	public static synthetic fun viewClusteredIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
 }
 
 public final class io/github/kromus/HnswConfig {
@@ -268,6 +276,16 @@ public final class io/github/kromus/TextIndex {
 	public final fun search (Ljava/lang/String;ILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/TextIndex;Ljava/lang/String;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public final fun updateAttributes (Ljava/lang/Object;Ljava/util/Map;)Z
+}
+
+public abstract interface class io/github/kromus/VectorBlocks {
+	public fun close ()V
+	public abstract fun getSize ()I
+	public abstract fun read (II[B)V
+}
+
+public final class io/github/kromus/VectorBlocks$DefaultImpls {
+	public static fun close (Lio/github/kromus/VectorBlocks;)V
 }
 
 public final class io/github/kromus/VectorIndex {

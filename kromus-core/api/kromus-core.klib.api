@@ -61,6 +61,14 @@ abstract interface <#A: kotlin/Any?> io.github.kromus/KeyCodec { // io.github.kr
     }
 }
 
+abstract interface io.github.kromus/VectorBlocks { // io.github.kromus/VectorBlocks|null[0]
+    abstract val size // io.github.kromus/VectorBlocks.size|{}size[0]
+        abstract fun <get-size>(): kotlin/Int // io.github.kromus/VectorBlocks.size.<get-size>|<get-size>(){}[0]
+
+    abstract fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray) // io.github.kromus/VectorBlocks.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray){}[0]
+    open fun close() // io.github.kromus/VectorBlocks.close|close(){}[0]
+}
+
 final class <#A: kotlin/Any?> io.github.kromus/ClusterEntry { // io.github.kromus/ClusterEntry|null[0]
     constructor <init>(#A, kotlin/FloatArray, kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // io.github.kromus/ClusterEntry.<init>|<init>(1:0;kotlin.FloatArray;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
 
@@ -70,6 +78,10 @@ final class <#A: kotlin/Any?> io.github.kromus/ClusterEntry { // io.github.kromu
         final fun <get-key>(): #A // io.github.kromus/ClusterEntry.key.<get-key>|<get-key>(){}[0]
     final val vector // io.github.kromus/ClusterEntry.vector|{}vector[0]
         final fun <get-vector>(): kotlin/FloatArray // io.github.kromus/ClusterEntry.vector.<get-vector>|<get-vector>(){}[0]
+}
+
+final class <#A: kotlin/Any?> io.github.kromus/ClusterSearcher { // io.github.kromus/ClusterSearcher|null[0]
+    final fun search(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/ClusterSearcher.search|search(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
 }
 
 final class <#A: kotlin/Any?> io.github.kromus/ClusteredIndex { // io.github.kromus/ClusteredIndex|null[0]
@@ -95,6 +107,7 @@ final class <#A: kotlin/Any?> io.github.kromus/ClusteredIndex { // io.github.kro
     final fun contains(#A): kotlin/Boolean // io.github.kromus/ClusteredIndex.contains|contains(1:0){}[0]
     final fun probedClusters(kotlin/FloatArray, kotlin/Int = ...): kotlin/IntArray // io.github.kromus/ClusteredIndex.probedClusters|probedClusters(kotlin.FloatArray;kotlin.Int){}[0]
     final fun search(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/ClusteredIndex.search|search(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
+    final fun searcher(): io.github.kromus/ClusterSearcher<#A> // io.github.kromus/ClusteredIndex.searcher|searcher(){}[0]
 
     final object Companion { // io.github.kromus/ClusteredIndex.Companion|null[0]
         final fun <#A2: kotlin/Any?> build(kotlin/Int, kotlin.collections/List<io.github.kromus/ClusterEntry<#A2>>, io.github.kromus/Metric = ..., io.github.kromus/ClusterConfig = ...): io.github.kromus/ClusteredIndex<#A2> // io.github.kromus/ClusteredIndex.Companion.build|build(kotlin.Int;kotlin.collections.List<io.github.kromus.ClusterEntry<0:0>>;io.github.kromus.Metric;io.github.kromus.ClusterConfig){0§<kotlin.Any?>}[0]
@@ -323,4 +336,5 @@ final fun <#A: kotlin/Any?> io.github.kromus/decodeTextIndex(kotlin/ByteArray, k
 final fun <#A: kotlin/Any?> io.github.kromus/decodeVectorIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): io.github.kromus/VectorIndex<#A> // io.github.kromus/decodeVectorIndex|decodeVectorIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/decodeVectorIndex(kotlin/ByteArray, kotlin.collections/List<kotlin/ByteArray>, io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): io.github.kromus/VectorIndex<#A> // io.github.kromus/decodeVectorIndex|decodeVectorIndex(kotlin.ByteArray;kotlin.collections.List<kotlin.ByteArray>;io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/rerank(kotlin/FloatArray, kotlin.collections/List<#A>, kotlin/Int, io.github.kromus/Metric = ..., kotlin/Function1<#A, kotlin/FloatArray?>): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/rerank|rerank(kotlin.FloatArray;kotlin.collections.List<0:0>;kotlin.Int;io.github.kromus.Metric;kotlin.Function1<0:0,kotlin.FloatArray?>){0§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> io.github.kromus/viewClusteredIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, io.github.kromus/VectorBlocks? = ..., kotlin/String? = ...): io.github.kromus/ClusteredIndex<#A> // io.github.kromus/viewClusteredIndex|viewClusteredIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;io.github.kromus.VectorBlocks?;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun io.github.kromus/provenanceOf(kotlin/ByteArray): kotlin/String? // io.github.kromus/provenanceOf|provenanceOf(kotlin.ByteArray){}[0]

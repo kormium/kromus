@@ -5,6 +5,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class ClusteredIndexTest {
@@ -277,5 +278,69 @@ class ClusteredIndexTest {
     private fun scattered(n: Int, seed: Int): List<FloatArray> {
         val rng = Random(seed)
         return List(n) { FloatArray(dim) { rng.nextFloat() * 2f - 1f } }
+    }
+
+    @Test
+    fun aStreamedIndexAnswersIdenticallyToOneThatHoldsItsVectors() {
+        // The streamed path reads distances out of raw bytes rather than out of arrays. That is a
+        // second implementation of the same arithmetic, and a second implementation that disagrees
+        // anywhere returns quietly wrong neighbours instead of failing — so it is held to matching
+        // exactly, score for score, across quantizations and metrics.
+        for (quantization in listOf(Quantization.None, Quantization.Int8)) {
+            for (metric in Metric.entries) {
+                val data = corpus(500, 51)
+                val index = ClusteredIndex.build(
+                    dim,
+                    data.mapIndexed { i, v -> ClusterEntry(i, v, mapOf("odd" to "${i % 2 == 1}")) },
+                    metric = metric,
+                    config = ClusterConfig(clusters = 16, nprobe = 4, quantization = quantization),
+                )
+                val blob = index.encodeToByteArray(KeyCodec.int)
+                val resident = decodeClusteredIndex(blob, KeyCodec.int)
+                val streamed = viewClusteredIndex(blob, KeyCodec.int)
+
+                val rng = Random(52)
+                repeat(15) {
+                    val q = FloatArray(dim) { rng.nextFloat() * 2f - 1f }
+                    assertEquals(
+                        resident.search(q, 10).map { it.key to it.score },
+                        streamed.search(q, 10).map { it.key to it.score },
+                        "$quantization/$metric",
+                    )
+                }
+                // Filters read attributes, which a streamed index still holds.
+                val filtered = streamed.search(data[0], 10, filter = { it["odd"] == "true" })
+                assertTrue(filtered.all { it.key % 2 == 1 })
+            }
+        }
+    }
+
+    @Test
+    fun aStreamedSearcherReusesItsBufferAcrossQueries() {
+        val data = corpus(400, 53)
+        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 12, nprobe = 3))
+        val streamed = viewClusteredIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+
+        val searcher = streamed.searcher()
+        val q = data[9]
+        val expected = searcher.search(q, 10).map { it.key }
+        // Repeated use has to be idempotent: a buffer reused between queries is a buffer that can
+        // carry the previous one's contents into the next.
+        repeat(5) { assertEquals(expected, searcher.search(q, 10).map { it.key }) }
+    }
+
+    @Test
+    fun binaryCannotBeStreamedAndSaysSo() {
+        val data = corpus(200, 54)
+        val index = ClusteredIndex.build(
+            dim,
+            entries(data),
+            config = ClusterConfig(clusters = 8, quantization = Quantization.Binary),
+        )
+        val blob = index.encodeToByteArray(KeyCodec.int)
+        val failure = assertFailsWith<KromusFormatException> { viewClusteredIndex(blob, KeyCodec.int) }
+        assertTrue("Binary" in failure.message!!, failure.message!!)
+        // ...and loads normally, which is the whole reason refusing is acceptable.
+        assertEquals(200, decodeClusteredIndex(blob, KeyCodec.int).size)
     }
 }
