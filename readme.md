@@ -26,18 +26,47 @@ It ships in layers:
 ## Why it exists
 
 On-device semantic search is now table stakes for AI features (private, offline, no per-query cost),
-but every existing option on Kotlin is a **C/C++ SQLite extension you bind per platform** — `sqlite-vec`
-(brute-force only), `vectorlite`/`hnswlib` (C++), ObjectBox (commercial, Android/JVM + a separate iOS
-product, not one KMP artifact). There is **no pure-Kotlin, common-code ANN index that runs on the whole
-KMP matrix**. That is the gap kromus fills.
+and on the JVM and Android there are already good ways to get it. What there is not, as far as we can
+find, is **one implementation in common code that covers the whole KMP matrix** — Android *and* iOS
+*and* Native *and* Wasm — and that puts vector, full-text and hybrid retrieval in a single artifact.
+That is the gap kromus fills, and it is a narrow one: the claim is about coverage in common code, not
+about being the only vector search available to Kotlin.
 
-|                         | ANN / HNSW | Full-text / BM25 | Hybrid + RRF | Pure KMP (iOS + Wasm + Native) |
-| ----------------------- | :--------: | :--------------: | :----------: | :----------------------------: |
-| sqlite-vec              | ✗ (brute)  |        ✗         |      ✗       |     C extension, per-platform  |
-| vectorlite / hnswlib    |     ✓      |        ✗         |      ✗       |     C++, per-platform          |
-| ObjectBox               |     ✓      |        ✗         |      ✗       |     ✗ (Android/JVM + iOS SDK)  |
-| SQLite FTS5             |     ✗      |        ✓         |      ✗       |     tied to SQLite             |
-| **kromus**              |     ✓      |        ✓         |      ✓       |     ✓ **common code**          |
+|                                    | ANN / HNSW | Full-text / BM25 | Hybrid + RRF | Runs on the whole KMP matrix |
+| ---------------------------------- | :--------: | :--------------: | :----------: | :--------------------------- |
+| [sqlite-vec][sv]                   | ✗ (brute)  |        ✗         |      ✗       | C extension, per-platform    |
+| [sqlite-vector][svec]              | ✗ (brute)  |        ✗         |      ✗       | C extension; Elastic License |
+| vectorlite / [hnswlib (C++)][hl]   |     ✓      |        ✗         |      ✗       | C++, per-platform            |
+| [hnswlib (Java)][jh]               |     ✓      |        ✗         |      ✗       | ✗ — JVM/Android only         |
+| [JVector][jv]                      |     ✓      |        ✗         |      ✗       | ✗ — JVM only                 |
+| [ObjectBox][ob]                    |     ✓      |        ✗         |      ✗       | ✗ — separate Java and Swift SDKs |
+| SQLite FTS5                        |     ✗      |        ✓         |      ✗       | tied to SQLite               |
+| **kromus**                         |     ✓      |        ✓         |      ✓       | ✓ **common code**            |
+
+[sv]: https://github.com/asg017/sqlite-vec
+[svec]: https://github.com/sqliteai/sqlite-vector
+[hl]: https://github.com/nmslib/hnswlib
+[jh]: https://github.com/jelmerk/hnswlib
+[jv]: https://github.com/datastax/jvector
+[ob]: https://objectbox.io/
+
+Worth being precise about the neighbours, because "there is nothing else" would be false:
+
+- **On the JVM and Android you do not need a native binary.** [hnswlib for Java][jh] is a pure-JVM HNSW
+  on Maven Central — thread-safe, serializable, incremental. [JVector][jv] is a more advanced embedded
+  engine in the same slice. Neither reaches iOS, Native or Wasm, which is the only reason kromus exists
+  rather than a wrapper around one of them.
+- **ObjectBox is not a paid product.** Its language bindings are Apache 2.0 and its core is documented
+  as always free to use; what it is not is open-source at the core, or one artifact — vector search is
+  offered to Java/Kotlin and to Swift as separate SDKs.
+- **sqlite-vec may not stay brute-force.** Its [ANN tracking issue][annissue] has been open since 2024
+  and is still choosing between IVF, HNSW and DiskANN, but that is a matter of when, not whether.
+
+[annissue]: https://github.com/asg017/sqlite-vec/issues/25
+
+Absence of evidence is not evidence of absence: this is what a search of the ecosystem turned up in
+August 2026, not a proof that no common-code alternative exists. If you know of one, an issue
+correcting this table is welcome.
 
 ## Install
 
