@@ -17,15 +17,14 @@ import kotlin.test.assertTrue
 /**
  * The wrappers' guarantees are only observable against real threads, so these are JVM-only.
  *
- * They pin down that the lock serializes *searches against each other*, not only searches against
- * writes. That is not an accident of the implementation and not an over-cautious choice: [VectorIndex]
- * searches are not re-entrant. `Hnsw` reuses its per-search scratch — the visited-mark array and its
- * epoch, the candidate heaps, the layer result buffers — across calls, which is what makes a query
- * allocate almost nothing, and also what makes two concurrent queries corrupt each other. Run
- * unguarded, most of them throw and the rest quietly return the wrong neighbours.
+ * Searches run in parallel and writes run alone. What made that possible was moving a traversal's
+ * working state — visited marks, candidate heaps, layer buffers — off the index and into a scratch a
+ * `searcher()` owns. While it lived on the index it was reused between calls, which is what makes a
+ * query allocate almost nothing and equally what made two concurrent queries corrupt each other:
+ * unguarded, most threw and the rest quietly returned the wrong neighbours.
  *
- * So anything that lets readers in parallel has to give each search its own scratch first. Until then
- * a plain `Mutex` is the correct guard, and these tests fail if someone loosens it.
+ * These tests hold the wrappers to both halves: results stay correct under concurrency, and readers
+ * genuinely overlap rather than queueing.
  */
 class ConcurrentIndexParallelismTest {
 
@@ -120,5 +119,40 @@ class ConcurrentIndexParallelismTest {
             }
         }
         assertEquals(800, guarded.size())
+    }
+
+    @Test
+    fun readersActuallyOverlapRatherThanQueueing() = runBlocking {
+        // The point of the readers-writer lock. Six searches that each take a measurable time must
+        // finish in far less than six times one of them; under a plain Mutex they could not.
+        val data = corpus(20_000, 11)
+        val bare = VectorIndex<Int>(dim, Metric.Cosine)
+        data.forEachIndexed { i, v -> bare.add(i, v) }
+        val guarded = bare.concurrent()
+        val queries = corpus(64, 12)
+
+        val readers = 6
+        val each = 400
+
+        suspend fun timeSearches(concurrency: Int): Long = withContext(Dispatchers.Default) {
+            val started = System.nanoTime()
+            (0 until concurrency).map { w ->
+                async { repeat(each) { r -> guarded.search(queries[(w * each + r) % queries.size], 10) } }
+            }.awaitAll()
+            System.nanoTime() - started
+        }
+
+        timeSearches(1) // warm up
+        val serial = timeSearches(1)
+        val parallel = timeSearches(readers)
+
+        // Six times the work in well under six times the wall clock. The bound is deliberately loose:
+        // this asserts that readers overlap at all, not how well the machine scales.
+        val speedup = (serial.toDouble() * readers) / parallel
+        assertTrue(
+            speedup > 2.0,
+            "readers should overlap: $readers x $each searches took ${parallel / 1_000_000} ms " +
+                "against ${serial / 1_000_000} ms for $each on one (effective speedup %.1fx)".format(speedup),
+        )
     }
 }
