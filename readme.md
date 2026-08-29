@@ -15,7 +15,7 @@ It ships in layers:
 - **Hybrid queries** — vector + full-text fused with Reciprocal Rank Fusion (RRF), the 2026 best
   practice that lifts recall well above either retriever alone.
 
-> **Status:** `0.15.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
+> **Status:** `0.16.0`, pre-1.0. All three layers, binary persistence, int8/binary quantization,
 > metadata filters, pluggable analyzers, full-precision re-rank, graph compaction, an optional kemus
 > storage adapter and an optional `kromus-onnx` embedder are usable today; the API may still change
 > before 1.0. See the [changelog](CHANGELOG.md) for what has moved and the roadmap for what's next.
@@ -45,12 +45,12 @@ KMP matrix**. That is the gap kromus fills.
 // build.gradle.kts — coordinates published under the kormium org's namespace
 kotlin {
     sourceSets.commonMain.dependencies {
-        implementation("io.github.kormium:kromus-core:0.15.0")
+        implementation("io.github.kormium:kromus-core:0.16.0")
 
         // Optional companion modules — see their own readmes for details.
-        implementation("io.github.kormium:kromus-kemus:0.15.0") // persist into a kemus store
-        implementation("io.github.kormium:kromus-onnx:0.15.0")  // on-device text embedder
-        implementation("io.github.kormium:kromus-sync:0.15.0")  // keep an index fresh from a Flow
+        implementation("io.github.kormium:kromus-kemus:0.16.0") // persist into a kemus store
+        implementation("io.github.kormium:kromus-onnx:0.16.0")  // on-device text embedder
+        implementation("io.github.kormium:kromus-sync:0.16.0")  // keep an index fresh from a Flow
     }
 }
 ```
@@ -186,8 +186,38 @@ val index = try {
 }
 ```
 
-Encoding is deterministic: the same index content produces the same bytes on every platform, so an
-index can be content-hashed, cached by digest, or compared in a test.
+Encoding is deterministic: the same index content produces the same bytes on every platform — and
+across a reload, since records and the string-keyed maps inside them are written in a fixed order
+rather than in whatever order a map happens to iterate. So an index can be content-hashed, cached by
+digest, or compared in a test.
+
+#### Saving only what changed
+
+A full encode rewrites everything, however little moved. That is right for "build once, ship it" and
+wrong for an index a sync keeps in step with changing data — at 50 000 vectors it is tens of
+megabytes after every batch, which on device is a write-amplification problem, not just a slow one.
+
+`encodeDelta` writes only what changed since the last save, and the decoders take a base plus the
+deltas recorded after it:
+
+```kotlin
+val base = index.encodeToByteArray(KeyCodec.string)   // also checkpoints the index
+
+index.add("doc-99", embed("something new"))
+val delta = index.encodeDelta(KeyCodec.string)        // null if nothing changed
+
+val reloaded = decodeHybridIndex(base, listOf(delta!!), KeyCodec.string)
+```
+
+An insert relinks tens of existing nodes, so a delta is not a plain append — but a stored vector is
+immutable, so a changed node owes only its adjacency and never its vector. That is what keeps a delta
+small. See the numbers [below](#incremental-persistence).
+
+Deltas accumulate; fold the chain back into a snapshot periodically by decoding it and re-encoding.
+`dirtyNodes` says how much has changed, and `needsFullSnapshot` says when a delta is not an option —
+`compact()` and `clear()` renumber internal ids, and deltas are written in terms of them. A delta
+names the revision it applies to, so replaying one out of order, skipping one, or mixing in a delta
+from a different index is rejected rather than quietly corrupting the result.
 
 The optional **[`kromus-kemus`](kromus-kemus/)** module stores an index in a [kemus](https://github.com/kormium/kemus)
 store (binary value), so it inherits kemus's persistence, TTL and offline→online sync — build once,
@@ -288,6 +318,21 @@ Every entry replaced once — the shape of an index kept in step with changing d
 Left alone, one round of replacements doubles the memory and makes queries 2.6× slower. `compact()`
 takes it back, at the cost of a full rebuild (29 s here) — which is why it belongs at app start or
 after a bulk sync, not on the edit path.
+
+### Incremental persistence
+
+What a save costs after a batch of edits. Both columns are measured against the same index state, so
+the crossover is real rather than an artefact of comparing against a stale snapshot.
+
+| edits | index | full encode | delta | smaller by | full | delta |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 50 001 | 30.7 MiB | 5.6 KiB | 5578× | 99 ms | 3.9 ms |
+| 10 | 50 011 | 30.7 MiB | 31.7 KiB | 990× | 71 ms | 1.4 ms |
+| 100 | 50 111 | 30.7 MiB | 273.8 KiB | 115× | 99 ms | 4.1 ms |
+| 1000 | 51 111 | 31.3 MiB | 2.3 MiB | 14× | 87 ms | 19.4 ms |
+
+The gap narrows as the batch grows, which is the signal to fold: once a batch is worth a sizeable
+fraction of the index, a delta stops being a bargain and a fresh snapshot is the better save.
 
 ### Recall vs corpus hardness
 
@@ -421,6 +466,8 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 14. **Traversal budget** ✅ `maxVisited` bounds the cost of a highly selective metadata filter.
 15. **Benchmarks** ✅ a suite covering recall, latency, quantization, filters and churn — see above.
 16. **Concurrency** ✅ optional `Mutex`-guarded index wrappers in `kromus-sync` for background writers.
+17. **Incremental persistence** ✅ `encodeDelta` writes only what changed; decoders replay a base plus
+    its deltas, with the chain checked so a stray delta cannot be applied.
 
 Next: multi-value and numeric metadata filters, an incremental "add to a persisted index without a
 full re-encode" path, and SIMD-friendly distance kernels where a platform offers them without
