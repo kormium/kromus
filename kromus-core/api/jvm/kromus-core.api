@@ -89,11 +89,12 @@ public final class io/github/kromus/HybridSearcher {
 }
 
 public final class io/github/kromus/IncrementalPersistenceKt {
-	public static final fun decodeHybridIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;)Lio/github/kromus/HybridIndex;
-	public static synthetic fun decodeHybridIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;ILjava/lang/Object;)Lio/github/kromus/HybridIndex;
-	public static final fun decodeTextIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;)Lio/github/kromus/TextIndex;
-	public static synthetic fun decodeTextIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;ILjava/lang/Object;)Lio/github/kromus/TextIndex;
-	public static final fun decodeVectorIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;)Lio/github/kromus/VectorIndex;
+	public static final fun decodeHybridIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;)Lio/github/kromus/HybridIndex;
+	public static synthetic fun decodeHybridIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/HybridIndex;
+	public static final fun decodeTextIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;)Lio/github/kromus/TextIndex;
+	public static synthetic fun decodeTextIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/TextIndex;
+	public static final fun decodeVectorIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/VectorIndex;
+	public static synthetic fun decodeVectorIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/VectorIndex;
 	public static final fun encodeDelta (Lio/github/kromus/HybridIndex;Lio/github/kromus/KeyCodec;)[B
 	public static final fun encodeDelta (Lio/github/kromus/TextIndex;Lio/github/kromus/KeyCodec;)[B
 	public static final fun encodeDelta (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;)[B
@@ -124,14 +125,19 @@ public final class io/github/kromus/Metric : java/lang/Enum {
 }
 
 public final class io/github/kromus/PersistenceKt {
-	public static final fun decodeHybridIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;)Lio/github/kromus/HybridIndex;
-	public static synthetic fun decodeHybridIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;ILjava/lang/Object;)Lio/github/kromus/HybridIndex;
-	public static final fun decodeTextIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;)Lio/github/kromus/TextIndex;
-	public static synthetic fun decodeTextIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;ILjava/lang/Object;)Lio/github/kromus/TextIndex;
-	public static final fun decodeVectorIndex ([BLio/github/kromus/KeyCodec;)Lio/github/kromus/VectorIndex;
-	public static final fun encodeToByteArray (Lio/github/kromus/HybridIndex;Lio/github/kromus/KeyCodec;)[B
-	public static final fun encodeToByteArray (Lio/github/kromus/TextIndex;Lio/github/kromus/KeyCodec;)[B
-	public static final fun encodeToByteArray (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;)[B
+	public static final fun decodeHybridIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;)Lio/github/kromus/HybridIndex;
+	public static synthetic fun decodeHybridIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/HybridIndex;
+	public static final fun decodeTextIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;)Lio/github/kromus/TextIndex;
+	public static synthetic fun decodeTextIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/TextIndex;
+	public static final fun decodeVectorIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/VectorIndex;
+	public static synthetic fun decodeVectorIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/VectorIndex;
+	public static final fun encodeToByteArray (Lio/github/kromus/HybridIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
+	public static final fun encodeToByteArray (Lio/github/kromus/TextIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
+	public static final fun encodeToByteArray (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
+	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/HybridIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/TextIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+	public static final fun provenanceOf ([B)Ljava/lang/String;
 }
 
 public final class io/github/kromus/Quantization : java/lang/Enum {

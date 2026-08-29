@@ -46,6 +46,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   a steady stream of readers. `read { }` joins other readers; `use { }` remains exclusive, because a
   caller-supplied block may write.
 
+- **Index provenance.** `encodeToByteArray(codec, provenance = "…")` records what produced an index,
+  and the decoders take `expect = "…"` and refuse a blob that does not match; `provenanceOf(bytes)`
+  reads it without decoding.
+
+  An index is only meaningful together with the embedding model that produced its vectors and the
+  analyzer that tokenized its text, and neither is part of the bytes. Search a corpus embedded by one
+  model with vectors from another and nothing fails — the results are simply wrong, quietly. That
+  failure gets much easier to reach once an index is built somewhere other than where it is used, so
+  the guard is opt-in but the mismatch is refused outright.
+
 - **`dirtyNodes`** on `VectorIndex` and `HybridIndex`, **`dirtyDocuments`** on `TextIndex` — how much
   has changed since the last save, for deciding when one is worth making.
 - **`needsFullSnapshot`** on all three — true when no delta can express what happened, which is after
@@ -54,6 +64,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **A corrupt node level no longer exhausts the heap.** A level is a count in disguise — `level + 1`
+  adjacency lists follow it — but it was validated only for being non-negative, so a corrupt two
+  billion reached `Array(level + 1)` and took the process down before any other check ran. That is the
+  exact failure every other length in the format is guarded against, reached by the one field that did
+  not go through the guard. Found by the existing fuzz test once an unrelated layout change moved
+  which byte it happened to corrupt.
 - **Searches on several threads no longer corrupt the index** — see `searcher()` above. This was
   reachable before only by ignoring the documented single-threaded contract, but it failed silently
   rather than loudly, which is the worse way to be wrong.
@@ -72,7 +88,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Migration
 
-- **The persistence format changed** (vector v5, text v4, hybrid v3) and 0.15.0 blobs cannot be read.
+- **The persistence format changed** (vector v6, text v5, hybrid v4) and 0.15.0 blobs cannot be read.
   They are rejected with a `KromusFormatException`, so catch it and rebuild, exactly as for the 0.15.0
   move:
 

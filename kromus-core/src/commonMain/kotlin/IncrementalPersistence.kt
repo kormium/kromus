@@ -172,8 +172,9 @@ public fun <K> decodeVectorIndex(
     bytes: ByteArray,
     deltas: List<ByteArray>,
     keyCodec: KeyCodec<K>,
+    expect: String? = null,
 ): VectorIndex<K> {
-    val index = decodeVectorIndex(bytes, keyCodec)
+    val index = decodeVectorIndex(bytes, keyCodec, expect)
     var revision = revisionOf(bytes)
     index.checkpoint(revision)
     for (delta in deltas) {
@@ -221,8 +222,7 @@ private fun <K> applyVectorDelta(
                 "corrupt kromus delta: new node $id does not follow the ${g.capacity} already present",
             )
         }
-        val level = r.int()
-        if (level < 0) throw KromusFormatException("corrupt kromus delta: negative level $level for node $id")
+        val level = r.level(id)
         when (store) {
             is Float32VectorStore -> store.load(FloatArray(dimensions) { r.float() })
             is Int8VectorStore -> store.load(ByteArray(dimensions) { r.byte().toByte() }, r.float())
@@ -377,8 +377,9 @@ public fun <K> decodeTextIndex(
     deltas: List<ByteArray>,
     keyCodec: KeyCodec<K>,
     analyzer: Analyzer = Analyzer.standard(),
+    expect: String? = null,
 ): TextIndex<K> {
-    val index = decodeTextIndex(bytes, keyCodec, analyzer)
+    val index = decodeTextIndex(bytes, keyCodec, analyzer, expect)
     var revision = revisionOf(bytes)
     index.checkpoint(revision)
     for (delta in deltas) {
@@ -476,9 +477,11 @@ public fun <K> decodeHybridIndex(
     deltas: List<ByteArray>,
     keyCodec: KeyCodec<K>,
     analyzer: Analyzer = Analyzer.standard(),
+    expect: String? = null,
 ): HybridIndex<K> {
     val r = ByteReader(bytes)
     r.header(KIND_HYBRID, HYBRID_FORMAT)
+    r.provenance(expect)
     val rrfK = r.int()
     if (rrfK < 1) throw KromusFormatException("corrupt kromus index: rrfK $rrfK")
     val vectorSnapshot = r.bytes()
