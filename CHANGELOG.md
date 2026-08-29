@@ -7,6 +7,62 @@ with what it takes to migrate.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once 1.0 lands.
 
+## [0.16.0] — 2026-08-29
+
+### Added
+
+- **`encodeDelta`** on all three indexes, with `decodeVectorIndex` / `decodeTextIndex` /
+  `decodeHybridIndex` overloads that take a base snapshot plus the deltas recorded after it. A full
+  encode rewrites everything however little moved — tens of megabytes after every batch on a 50 000-
+  vector index, which on device is a write-amplification problem and not just a slow one.
+
+  An insert into an HNSW graph is symmetric, so it relinks tens of *existing* nodes scattered across
+  the id space; a delta could not simply append the new ones. What makes it small instead is that a
+  stored vector is immutable — ids are never reused, so re-adding a key allocates a new node and
+  tombstones the old one — and a changed existing node therefore owes only its deleted flag and its
+  adjacency, never the vector that is the bulk of it.
+
+  A delta names the revision it applies to, so replaying one out of order, skipping one in a chain, or
+  applying one built from a different index is rejected with a `KromusFormatException` rather than
+  silently corrupting the result.
+
+  Deltas accumulate: fold the chain back into a snapshot periodically by decoding it and re-encoding.
+
+- **`dirtyNodes`** on `VectorIndex` and `HybridIndex`, **`dirtyDocuments`** on `TextIndex` — how much
+  has changed since the last save, for deciding when one is worth making.
+- **`needsFullSnapshot`** on all three — true when no delta can express what happened, which is after
+  `compact()` or `clear()` (both renumber or drop the internal ids deltas are written in terms of) and
+  before anything has been encoded at all.
+
+### Fixed
+
+- **Byte-stability now survives a reload.** Encoding a reloaded index did not reproduce the bytes of
+  the index it came from, so an index could not be compared to a cached copy by digest — which is what
+  the guarantee exists for. Attribute and term-frequency maps were written in map-iteration order, and
+  `add` builds those maps differently from the decoder (and a caller can pass any `Map` at all), so
+  identical content encoded differently. Both are now written sorted by key, making the layout a
+  function of the content alone.
+
+### Changed
+
+- `encodeToByteArray` now also **checkpoints** the index: `dirtyNodes` drops to zero and later
+  `encodeDelta` calls chain onto those bytes. Keep what it returns — a delta written against a
+  snapshot you discarded has nothing to be applied to.
+
+### Migration
+
+- **The persistence format changed** (vector v5, text v4, hybrid v3) and 0.15.0 blobs cannot be read.
+  They are rejected with a `KromusFormatException`, so catch it and rebuild, exactly as for the 0.15.0
+  move:
+
+  ```kotlin
+  val index = try {
+      decodeHybridIndex(cached, KeyCodec.string)
+  } catch (e: KromusFormatException) {
+      buildIndexFromScratch()
+  }
+  ```
+
 ## [0.15.0] — 2026-08-24
 
 ### Added

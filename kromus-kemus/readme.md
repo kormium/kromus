@@ -54,7 +54,7 @@ scope.launch {
 ## The format will move under you
 
 A persisted index outlives the build that wrote it, and pre-1.0 the binary format changes between
-versions — 0.15.0 alone moved vector to v4, text to v3 and hybrid to v2. A store is where this bites,
+versions — 0.16.0 alone moved vector to v5, text to v4 and hybrid to v3. A store is where this bites,
 because the stale blob is sitting in it waiting for the next release to read.
 
 Decoding is defensive about it: blobs carry a magic header, a kind byte and a format version, and
@@ -71,17 +71,35 @@ val index = try {
 
 ## What it costs
 
-**Saving rewrites the whole index.** There is no incremental encode: `saveTo` serializes every entry
-every time, so the write is O(index size) whether one document changed or all of them. For an index
-you rebuild occasionally that is a non-issue; for one a sync keeps hot, save on a timer or at
-lifecycle boundaries rather than after each snapshot.
+`saveTo` writes the whole index: every entry, every time, O(index size) whether one document changed
+or all of them. On a 50 000-vector index that is tens of megabytes, which on device is a write-
+amplification problem and not merely a slow one.
 
-Since 0.15.0 encoding is **deterministic** — the same content produces the same bytes on every
-platform — so you can content-hash the blob and skip the write when nothing actually changed.
+Since 0.16.0 you do not have to pay it after every edit. `encodeDelta` writes only what changed, and
+the loaders take a base plus the deltas recorded after it:
+
+```kotlin
+// once, on a fresh index or when folding the log back up
+store.setBytes("docs", index.encodeToByteArray(KeyCodec.string))
+
+// after a batch of edits
+index.encodeDelta(KeyCodec.string)?.let { store.setBytes("docs.d$n", it) }
+
+// on load
+val index = decodeHybridIndex(store.getBytes("docs")!!, deltas, KeyCodec.string)
+```
+
+Deltas accumulate, so fold periodically — decode the chain and `encodeToByteArray` the result. Use
+`dirtyNodes` to decide when a save is worth making at all, and `needsFullSnapshot` to know when a
+delta is not an option: `compact()` and `clear()` renumber ids, and deltas are written in terms of
+them.
+
+Encoding is also **deterministic** — the same content produces the same bytes on every platform, and
+that holds across a reload — so you can content-hash a blob and skip a write when nothing changed.
 
 Worth knowing: `remove` and re-adding a key leave tombstones, and tombstones are serialized like
 everything else. `compact()` before a save reclaims them; `tombstones` tells you whether it is worth
-the rebuild.
+the rebuild — at the price of forcing the next save to be a full snapshot.
 
 ## Status
 
@@ -90,7 +108,7 @@ JS and Wasm. The only module in the suite with an external dependency: `io.githu
 exposed as `api`, so a consumer gets the kemus types without declaring it twice.
 
 ```kotlin
-implementation("io.github.kormium:kromus-kemus:0.15.0")
+implementation("io.github.kormium:kromus-kemus:0.16.0")
 ```
 
 ## License
