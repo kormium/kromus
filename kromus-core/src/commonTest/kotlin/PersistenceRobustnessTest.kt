@@ -63,9 +63,13 @@ class PersistenceRobustnessTest {
     @Test
     fun rejectsACorruptedCountInsteadOfAllocatingForIt() {
         val bytes = vectorIndex().encodeToByteArray(KeyCodec.int)
-        // The node count sits right after the header and the config block; blow it up to a number
-        // no blob this size could hold.
-        val offset = 6 + 4 + 1 + 4 + 4 + 4 + 8 + 1 + 4
+        // The node count sits right after the header, the provenance flag and the config block; blow
+        // it up to a number no blob this size could hold. Spelled out field by field so that a format
+        // change breaks this line visibly rather than shifting it onto some other field.
+        val header = 6
+        val provenanceAbsent = 1
+        val config = 4 + 1 + 4 + 4 + 4 + 8 + 1 + 4 // dimensions, metric, m, efC, efS, seed, quant, maxVisited
+        val offset = header + provenanceAbsent + config
         bytes[offset] = 0x7F
         bytes[offset + 1] = 0x00
         bytes[offset + 2] = 0x00
@@ -161,5 +165,26 @@ class PersistenceRobustnessTest {
         index.add(1, floatArrayOf(1f, 0f, 0f, 0f))
         val restored = decodeVectorIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
         assertEquals(1234, restored.config.maxVisited)
+    }
+
+    @Test
+    fun rejectsACorruptedLevelInsteadOfAllocatingForIt() {
+        // A level is a count in disguise: level + 1 adjacency lists follow it. Validating only that it
+        // is non-negative let a corrupt two-billion through to `Array(level + 1)`, which exhausted the
+        // heap before any other check ran — the failure every other length in this format is guarded
+        // against, reached by the one field that was not.
+        val bytes = vectorIndex().encodeToByteArray(KeyCodec.int)
+        val header = 6
+        val provenanceAbsent = 1
+        val config = 4 + 1 + 4 + 4 + 4 + 8 + 1 + 4
+        val nodeCount = 4
+        val level = header + provenanceAbsent + config + nodeCount // the first node's level
+        bytes[level] = 0x7F
+        bytes[level + 1] = 0x00
+        bytes[level + 2] = 0x00
+        bytes[level + 3] = 0x00
+
+        val e = assertFailsWith<KromusFormatException> { decodeVectorIndex(bytes, KeyCodec.int) }
+        assertTrue(e.message!!.contains("level"), e.message!!)
     }
 }

@@ -125,6 +125,28 @@ internal class ByteReader(
         return n
     }
 
+    /**
+     * Rejects a node level that the remaining bytes could not possibly describe.
+     *
+     * A level is not read through [count], but it is a count in disguise: `level + 1` adjacency lists
+     * follow it, each costing at least its own four-byte length. Without this a corrupt level of two
+     * billion is merely "not negative", and the `Array(level + 1)` that follows exhausts the heap
+     * before any other check runs — the exact failure [count] exists to prevent, reached by a field
+     * that did not go through it.
+     */
+    fun level(id: Int): Int {
+        val level = int()
+        if (level < 0) throw KromusFormatException("corrupt kromus index: negative level $level for node $id")
+        val needed = (level.toLong() + 1) * 4
+        if (needed > remaining) {
+            throw KromusFormatException(
+                "corrupt kromus index: node $id claims level $level, whose ${level + 1} layer(s) need " +
+                    "at least $needed byte(s) but only $remaining remain",
+            )
+        }
+        return level
+    }
+
     /** Reads an enum ordinal, rejecting values this build does not know. */
     fun <T> enumValue(values: List<T>, what: String): T {
         val ordinal = byte()
