@@ -95,8 +95,28 @@ internal class ReadWriteMutex {
             }
             CompletableDeferred<Unit>().also { writerQueue.addLast(it) }
         }
-        // handOff marks us the holder before completing this, so there is nothing left to claim.
-        signal.await()
+        // handOff marks us the holder before completing this, so on a normal wake there is nothing
+        // left to claim. On a cancelled one there is: the lock may already have been handed to a
+        // waiter that will never take it, which strands it for good. Leaving the queue has to happen
+        // either way, and it has to happen uninterruptibly.
+        try {
+            signal.await()
+        } catch (cancellation: Throwable) {
+            withContext(NonCancellable) {
+                queues.withLock {
+                    if (writerQueue.remove(signal)) {
+                        // Still queued: nobody handed us anything, so just stop waiting.
+                        writersWaiting.addAndFetch(-1)
+                    } else {
+                        // Already made the holder — pass it on rather than hold it forever.
+                        writersWaiting.addAndFetch(-1)
+                        holders.store(0)
+                        handOff()
+                    }
+                }
+            }
+            throw cancellation
+        }
         writersWaiting.addAndFetch(-1)
     }
 
