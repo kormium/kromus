@@ -95,7 +95,14 @@ final class <#A: kotlin/Any?> io.github.kromus/HybridIndex { // io.github.kromus
     final fun search(kotlin/FloatArray, kotlin/String, kotlin/Int, kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/HybridIndex.search|search(kotlin.FloatArray;kotlin.String;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
     final fun searchText(kotlin/String, kotlin/Int, kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/HybridIndex.searchText|searchText(kotlin.String;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
     final fun searchVector(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/HybridIndex.searchVector|searchVector(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
+    final fun searcher(): io.github.kromus/HybridSearcher<#A> // io.github.kromus/HybridIndex.searcher|searcher(){}[0]
     final fun updateAttributes(#A, kotlin.collections/Map<kotlin/String, kotlin/String>): kotlin/Boolean // io.github.kromus/HybridIndex.updateAttributes|updateAttributes(1:0;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
+}
+
+final class <#A: kotlin/Any?> io.github.kromus/HybridSearcher { // io.github.kromus/HybridSearcher|null[0]
+    final fun search(kotlin/FloatArray, kotlin/String, kotlin/Int, kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/HybridSearcher.search|search(kotlin.FloatArray;kotlin.String;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
+    final fun searchText(kotlin/String, kotlin/Int, kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/HybridSearcher.searchText|searchText(kotlin.String;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
+    final fun searchVector(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/HybridSearcher.searchVector|searchVector(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
 }
 
 final class <#A: kotlin/Any?> io.github.kromus/TextIndex { // io.github.kromus/TextIndex|null[0]
@@ -148,8 +155,13 @@ final class <#A: kotlin/Any?> io.github.kromus/VectorIndex { // io.github.kromus
     final fun contains(#A): kotlin/Boolean // io.github.kromus/VectorIndex.contains|contains(1:0){}[0]
     final fun remove(#A): kotlin/Boolean // io.github.kromus/VectorIndex.remove|remove(1:0){}[0]
     final fun search(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/VectorIndex.search|search(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
+    final fun searcher(): io.github.kromus/VectorSearcher<#A> // io.github.kromus/VectorIndex.searcher|searcher(){}[0]
     final fun updateAttributes(#A, kotlin.collections/Map<kotlin/String, kotlin/String>): kotlin/Boolean // io.github.kromus/VectorIndex.updateAttributes|updateAttributes(1:0;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
     final fun vectorOf(#A): kotlin/FloatArray? // io.github.kromus/VectorIndex.vectorOf|vectorOf(1:0){}[0]
+}
+
+final class <#A: kotlin/Any?> io.github.kromus/VectorSearcher { // io.github.kromus/VectorSearcher|null[0]
+    final fun search(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/VectorSearcher.search|search(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
 }
 
 final class <#A: out kotlin/Any?> io.github.kromus/SearchResult { // io.github.kromus/SearchResult|null[0]

@@ -75,7 +75,17 @@ public final class io/github/kromus/HybridIndex {
 	public static synthetic fun searchText$default (Lio/github/kromus/HybridIndex;Ljava/lang/String;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public final fun searchVector ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun searchVector$default (Lio/github/kromus/HybridIndex;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+	public final fun searcher ()Lio/github/kromus/HybridSearcher;
 	public final fun updateAttributes (Ljava/lang/Object;Ljava/util/Map;)Z
+}
+
+public final class io/github/kromus/HybridSearcher {
+	public final fun search ([FLjava/lang/String;IIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/HybridSearcher;[FLjava/lang/String;IIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+	public final fun searchText (Ljava/lang/String;ILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun searchText$default (Lio/github/kromus/HybridSearcher;Ljava/lang/String;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+	public final fun searchVector ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun searchVector$default (Lio/github/kromus/HybridSearcher;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 }
 
 public final class io/github/kromus/IncrementalPersistenceKt {
@@ -212,7 +222,13 @@ public final class io/github/kromus/VectorIndex {
 	public final fun remove (Ljava/lang/Object;)Z
 	public final fun search ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/VectorIndex;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+	public final fun searcher ()Lio/github/kromus/VectorSearcher;
 	public final fun updateAttributes (Ljava/lang/Object;Ljava/util/Map;)Z
 	public final fun vectorOf (Ljava/lang/Object;)[F
+}
+
+public final class io/github/kromus/VectorSearcher {
+	public final fun search ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/VectorSearcher;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 }
 

@@ -164,6 +164,13 @@ public class HybridIndex<K> private constructor(
     public fun searchText(text: String, k: Int, filter: MetadataFilter? = null): List<SearchResult<K>> =
         textIndex.search(text, k, filter)
 
+    /**
+     * A reader with traversal state of its own, so several can search this index at the same time.
+     * See [VectorIndex.searcher] for the contract — in particular that nothing may write to the index
+     * while a search runs.
+     */
+    public fun searcher(): HybridSearcher<K> = HybridSearcher(this)
+
     // --- persistence support (accessed by Persistence.kt) ---
 
     internal fun vectorPart(): VectorIndex<K> = vectorIndex
