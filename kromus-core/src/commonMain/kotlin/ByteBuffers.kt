@@ -26,6 +26,17 @@ internal class ByteWriter(
         buf[pos++] = value.toByte()
     }
 
+    /** Bytes written so far. */
+    val size: Int get() = pos
+
+    /** Two bytes, unsigned: 0..65535. */
+    fun short(value: Int) {
+        require(value in 0..0xFFFF) { "short out of range: $value" }
+        ensure(2)
+        buf[pos++] = (value ushr 8).toByte()
+        buf[pos++] = value.toByte()
+    }
+
     fun int(value: Int) {
         ensure(4)
         buf[pos++] = (value ushr 24).toByte()
@@ -65,10 +76,13 @@ internal class ByteWriter(
  */
 internal class ByteReader(
     private val buf: ByteArray,
+    private val start: Int = 0,
+    length: Int = buf.size - start,
 ) {
-    private var pos = 0
+    private var pos = start
+    private val end = start + length
 
-    val remaining: Int get() = buf.size - pos
+    val remaining: Int get() = end - pos
 
     private fun need(n: Int) {
         if (n > remaining) {
@@ -81,6 +95,14 @@ internal class ByteReader(
     fun byte(): Int {
         need(1)
         return buf[pos++].toInt() and 0xFF
+    }
+
+    /** Two bytes, unsigned: 0..65535, which is why a two-byte field holds twice what a signed one would. */
+    fun short(): Int {
+        need(2)
+        val v = ((buf[pos].toInt() and 0xFF) shl 8) or (buf[pos + 1].toInt() and 0xFF)
+        pos += 2
+        return v
     }
 
     fun int(): Int {
@@ -147,6 +169,23 @@ internal class ByteReader(
         return level
     }
 
+    /**
+     * A two-byte count, bounded against the bytes that remain exactly as [count] is.
+     *
+     * Same guard, narrower field: a short count cannot be negative, so only the "could not possibly
+     * fit" half of the check applies.
+     */
+    fun shortCount(minBytesEach: Int, what: String): Int {
+        val n = short()
+        if (n.toLong() * minBytesEach > remaining) {
+            throw KromusFormatException(
+                "corrupt kromus index: $what count $n needs at least ${n.toLong() * minBytesEach} " +
+                    "byte(s) but only $remaining remain",
+            )
+        }
+        return n
+    }
+
     /** Reads an enum ordinal, rejecting values this build does not know. */
     fun <T> enumValue(values: List<T>, what: String): T {
         val ordinal = byte()
@@ -157,67 +196,52 @@ internal class ByteReader(
     }
 }
 
-// Every index starts with "KRMS", a kind byte and a format version, so a decoder can tell a foreign
-// or stale blob from a truncated one and say which it is.
-private const val MAGIC_0 = 0x4B // 'K'
-private const val MAGIC_1 = 0x52 // 'R'
-private const val MAGIC_2 = 0x4D // 'M'
-private const val MAGIC_3 = 0x53 // 'S'
-
-internal const val KIND_VECTOR: Int = 1
-internal const val KIND_TEXT: Int = 2
-internal const val KIND_HYBRID: Int = 3
-
-// Deltas carry their own kinds, so feeding a snapshot where a delta belongs (or the reverse) is
-// reported as the mix-up it is rather than as a version mismatch.
-internal const val KIND_VECTOR_DELTA: Int = 4
-internal const val KIND_TEXT_DELTA: Int = 5
-internal const val KIND_HYBRID_DELTA: Int = 6
-
-private fun kindName(kind: Int): String =
-    when (kind) {
-        KIND_VECTOR -> "vector"
-        KIND_TEXT -> "text"
-        KIND_HYBRID -> "hybrid"
-        KIND_VECTOR_DELTA -> "vector delta"
-        KIND_TEXT_DELTA -> "text delta"
-        KIND_HYBRID_DELTA -> "hybrid delta"
-        else -> "unknown($kind)"
+/**
+ * FNV-1a over a byte range: the checksum a container records per section, and the revision a delta
+ * chains from. Integer arithmetic only — no dependency, identical on every target.
+ */
+internal fun checksumOf(bytes: ByteArray, from: Int = 0, length: Int = bytes.size - from): Long {
+    var h = -0x340d631b7bdddcdbL // 14695981039346656037
+    for (i in from until from + length) {
+        h = h xor (bytes[i].toLong() and 0xFF)
+        h *= 0x100000001b3L
     }
-
-internal fun ByteWriter.header(kind: Int, version: Int) {
-    byte(MAGIC_0)
-    byte(MAGIC_1)
-    byte(MAGIC_2)
-    byte(MAGIC_3)
-    byte(kind)
-    byte(version)
+    return h
 }
 
-/** Verifies the magic, kind and version, or throws a [KromusFormatException] saying which failed. */
-internal fun ByteReader.header(kind: Int, version: Int) {
-    if (remaining < 6) {
-        throw KromusFormatException("not a kromus index: only $remaining byte(s), need at least 6")
+/**
+ * Writes an optional provenance string. Present or absent is one byte, so "no provenance" and
+ * "provenance is the empty string" stay distinguishable.
+ */
+internal fun ByteWriter.provenance(value: String?) {
+    if (value == null) {
+        byte(0)
+    } else {
+        byte(1)
+        bytes(value.encodeToByteArray())
     }
-    if (byte() != MAGIC_0 || byte() != MAGIC_1 || byte() != MAGIC_2 || byte() != MAGIC_3) {
+}
+
+/**
+ * Reads the stored provenance and, when the caller said what it expects, refuses a mismatch.
+ *
+ * This is the guard against the failure that persistence cannot catch on its own: an index is only
+ * meaningful together with whatever produced its vectors and tokenized its text, and neither an
+ * embedding model nor an analyzer is part of the bytes. Query a corpus embedded by one model with
+ * vectors from another and nothing throws — the results are simply wrong, quietly, forever. That is
+ * the whole reason to make the caller name what it is expecting.
+ */
+internal fun ByteReader.provenance(expected: String?): String? {
+    val stored = if (byte() == 1) bytes().decodeToString() else null
+    if (expected != null && stored != expected) {
         throw KromusFormatException(
-            "not a kromus index: bad magic (an index written by kromus 0.14 or earlier has no magic " +
-                "header and must be rebuilt)",
+            "kromus index provenance mismatch: it was built as " +
+                (stored?.let { "'$it'" } ?: "(none recorded)") +
+                " but '$expected' was expected — searching it with a different embedding model or " +
+                "analyzer returns wrong results rather than failing, so this is refused",
         )
     }
-    val actualKind = byte()
-    if (actualKind != kind) {
-        throw KromusFormatException(
-            "expected a kromus ${kindName(kind)} index, found a ${kindName(actualKind)} one",
-        )
-    }
-    val actualVersion = byte()
-    if (actualVersion != version) {
-        throw KromusFormatException(
-            "kromus ${kindName(kind)} index format v$actualVersion cannot be read by this build " +
-                "(it reads v$version) — rebuild the index from your source data",
-        )
-    }
+    return stored
 }
 
 /**

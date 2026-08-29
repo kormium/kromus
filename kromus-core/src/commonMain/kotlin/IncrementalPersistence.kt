@@ -34,15 +34,7 @@ private const val HYBRID_DELTA_FORMAT: Int = 1
  * silently. Hashing the bytes makes the check depend on the actual history. FNV-1a is integer
  * arithmetic only — no dependency, identical on every target.
  */
-internal fun revisionOf(bytes: ByteArray): Long {
-    var h = -0x340d631b7bdddcdbL // 14695981039346656037
-    for (b in bytes) {
-        h = h xor (b.toLong() and 0xFF)
-        h *= 0x100000001b3L
-    }
-    // 0 is reserved for "never encoded", so fold it onto a neighbouring value.
-    return if (h == 0L) 1L else h
-}
+internal fun revisionOf(bytes: ByteArray): Long = checksumOf(bytes)
 
 private fun ByteReader.expectParent(actual: Long, what: String) {
     val declared = long()
@@ -85,7 +77,7 @@ public fun <K> VectorIndex<K>.encodeDelta(keyCodec: KeyCodec<K>): ByteArray? {
     // the rest existed already and owe only their mutable state.
     val firstNewId = baseCapacity
     val w = ByteWriter()
-    w.header(KIND_VECTOR_DELTA, VECTOR_DELTA_FORMAT)
+    w.deltaHeader(KIND_VECTOR_DELTA, VECTOR_DELTA_FORMAT)
     w.long(parent)
     w.int(capacity)
     w.int(g.entryPointValue)
@@ -192,7 +184,7 @@ private fun <K> applyVectorDelta(
     keyCodec: KeyCodec<K>,
 ) {
     val r = ByteReader(delta)
-    r.header(KIND_VECTOR_DELTA, VECTOR_DELTA_FORMAT)
+    r.deltaHeader(KIND_VECTOR_DELTA, VECTOR_DELTA_FORMAT)
     r.expectParent(parent, "vector")
 
     val g = index.graph()
@@ -310,7 +302,7 @@ public fun <K> TextIndex<K>.encodeDelta(keyCodec: KeyCodec<K>): ByteArray? {
     if (changes.isEmpty()) return null
 
     val w = ByteWriter()
-    w.header(KIND_TEXT_DELTA, TEXT_DELTA_FORMAT)
+    w.deltaHeader(KIND_TEXT_DELTA, TEXT_DELTA_FORMAT)
     w.long(revision)
 
     val pool = StringPoolWriter()
@@ -392,7 +384,7 @@ public fun <K> decodeTextIndex(
 
 private fun <K> applyTextDelta(index: TextIndex<K>, delta: ByteArray, parent: Long, keyCodec: KeyCodec<K>) {
     val r = ByteReader(delta)
-    r.header(KIND_TEXT_DELTA, TEXT_DELTA_FORMAT)
+    r.deltaHeader(KIND_TEXT_DELTA, TEXT_DELTA_FORMAT)
     r.expectParent(parent, "text")
 
     val pool = StringPoolReader(r)
@@ -455,7 +447,7 @@ public fun <K> HybridIndex<K>.encodeDelta(keyCodec: KeyCodec<K>): ByteArray? {
     if (vectorDelta == null && textDelta == null) return null
 
     val w = ByteWriter()
-    w.header(KIND_HYBRID_DELTA, HYBRID_DELTA_FORMAT)
+    w.deltaHeader(KIND_HYBRID_DELTA, HYBRID_DELTA_FORMAT)
     // Either half can be unchanged on its own — a metadata edit through one modality, say — so each
     // is optional rather than the pair being all-or-nothing.
     w.byte(if (vectorDelta != null) 1 else 0)
@@ -479,13 +471,12 @@ public fun <K> decodeHybridIndex(
     analyzer: Analyzer = Analyzer.standard(),
     expect: String? = null,
 ): HybridIndex<K> {
-    val r = ByteReader(bytes)
-    r.header(KIND_HYBRID, HYBRID_FORMAT)
-    r.provenance(expect)
-    val rrfK = r.int()
+    // A hybrid snapshot is a container; its halves are sections, not a length-prefixed stream.
+    val c = ContainerReader(bytes, KIND_HYBRID, HYBRID_FORMAT, expect)
+    val rrfK = c.section("CNFG").int()
     if (rrfK < 1) throw KromusFormatException("corrupt kromus index: rrfK $rrfK")
-    val vectorSnapshot = r.bytes()
-    val textSnapshot = r.bytes()
+    val vectorSnapshot = c.sectionBytes("VIDX")
+    val textSnapshot = c.sectionBytes("TIDX")
 
     // Split each hybrid delta into its two halves and hand them to the layers, which do their own
     // chaining checks against their own snapshots.
@@ -493,7 +484,7 @@ public fun <K> decodeHybridIndex(
     val textDeltas = ArrayList<ByteArray>()
     for (delta in deltas) {
         val dr = ByteReader(delta)
-        dr.header(KIND_HYBRID_DELTA, HYBRID_DELTA_FORMAT)
+        dr.deltaHeader(KIND_HYBRID_DELTA, HYBRID_DELTA_FORMAT)
         if (dr.byte() == 1) vectorDeltas.add(dr.bytes())
         if (dr.byte() == 1) textDeltas.add(dr.bytes())
     }
