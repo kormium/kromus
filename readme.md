@@ -191,6 +191,26 @@ index comes out byte-identical to one built from the same entries.
 
 `updateAttributes(key, …)` exists so metadata edits never create a tombstone in the first place.
 
+### Searching on several threads
+
+A search reads the graph and changes nothing in it, but it is still not safe to run two at once on the
+same index: a traversal's working state — visited marks, candidate heaps, layer buffers — is reused
+between calls, which is what makes a query allocate almost nothing. Unguarded, concurrent searches
+mostly throw, and the ones that survive return the wrong neighbours.
+
+A **searcher** owns that state, so searchers do not interact:
+
+```kotlin
+// one per thread or coroutine, not one shared between them
+val searcher = index.searcher()
+val hits = searcher.search(queryEmbedding, k = 10)
+```
+
+The index's own contract is unchanged: **nothing may write to it while a search runs.** Searchers make
+reads parallel, not reads-and-writes concurrent. If something is writing — a sync keeping the index
+fresh — use [`kromus-sync`](kromus-sync/)'s `.concurrent()` wrapper, which arranges both: searches run
+alongside each other, a writer runs alone, and a writer is not starved by a steady stream of searches.
+
 ### Persistence
 
 Building an HNSW graph is expensive; persist a prebuilt index and reload it instantly (ship it with
@@ -363,6 +383,23 @@ the crossover is real rather than an artefact of comparing against a stale snaps
 The gap narrows as the batch grows, which is the signal to fold: once a batch is worth a sizeable
 fraction of the index, a delta stops being a bargain and a fresh snapshot is the better save.
 
+### Parallel search
+
+One index, one searcher per thread, no lock.
+
+| threads | searches/sec | vs 1 thread | mean query |
+| --- | --- | --- | --- |
+| 1 | 4 986 | 1.00× | 201 µs |
+| 2 | 10 334 | 2.07× | 194 µs |
+| 4 | 23 115 | 4.64× | 173 µs |
+| 8 | 40 150 | 8.05× | 199 µs |
+| 16 | 46 005 | 9.23× | 348 µs |
+
+Near-linear to the physical cores. Past them throughput still climbs but latency does too — 16 threads
+buy 15% more work for 75% slower queries, which is the wrong trade if anyone is waiting on one. How
+far it scales depends on whether the working set still fits cache, so read the row your corpus sits
+at rather than the last one.
+
 ### Recall vs corpus hardness
 
 10 000 vectors, `efSearch = 64` — the context every recall number needs.
@@ -497,6 +534,8 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 16. **Concurrency** ✅ optional `Mutex`-guarded index wrappers in `kromus-sync` for background writers.
 17. **Incremental persistence** ✅ `encodeDelta` writes only what changed; decoders replay a base plus
     its deltas, with the chain checked so a stray delta cannot be applied.
+18. **Parallel search** ✅ `searcher()` gives a reader its own traversal state, so searches run on every
+    core; `kromus-sync`'s wrappers pair that with a writer-preferring lock.
 
 Next: multi-value and numeric metadata filters, an incremental "add to a persisted index without a
 full re-encode" path, and SIMD-friendly distance kernels where a platform offers them without

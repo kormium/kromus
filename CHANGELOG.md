@@ -28,6 +28,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
   Deltas accumulate: fold the chain back into a snapshot periodically by decoding it and re-encoding.
 
+- **`VectorIndex.searcher()` / `HybridIndex.searcher()`**, returning a reader that owns the working
+  state one traversal needs, so several searchers can query one index at the same time.
+
+  Searches were never safe to run concurrently, and not by oversight: 0.15.0 moved a traversal's
+  visited marks, candidate heaps and layer buffers onto the index and reused them between calls, which
+  is what made a query allocate almost nothing — and equally what made two concurrent queries corrupt
+  each other. Unguarded on eight threads, most searches threw and the rest quietly returned the wrong
+  neighbours. That state now belongs to a searcher, and the index is merely read during a search.
+
+  The contract that remains is the index's: nothing may write to it while a search runs. Searchers
+  make *reads* parallel, not reads-and-writes concurrent.
+
+- **kromus-sync: parallel searches through the `.concurrent()` wrappers.** They now use a
+  writer-preferring readers-writer lock and a pool of searchers instead of a single `Mutex`, so
+  searches run alongside each other while a writer still gets exclusive access — and is not starved by
+  a steady stream of readers. `read { }` joins other readers; `use { }` remains exclusive, because a
+  caller-supplied block may write.
+
 - **`dirtyNodes`** on `VectorIndex` and `HybridIndex`, **`dirtyDocuments`** on `TextIndex` — how much
   has changed since the last save, for deciding when one is worth making.
 - **`needsFullSnapshot`** on all three — true when no delta can express what happened, which is after
@@ -36,6 +54,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **Searches on several threads no longer corrupt the index** — see `searcher()` above. This was
+  reachable before only by ignoring the documented single-threaded contract, but it failed silently
+  rather than loudly, which is the worse way to be wrong.
 - **Byte-stability now survives a reload.** Encoding a reloaded index did not reproduce the bytes of
   the index it came from, so an index could not be compared to a cached copy by digest — which is what
   the guarantee exists for. Attribute and term-frequency maps were written in map-iteration order, and

@@ -43,6 +43,7 @@ fun main(args: Array<String>) {
         println("running: churn and compaction")
         add(compaction(dataset, options.k))
         add(incrementalPersistence(dataset, listOf(1, 10, 100, 1_000)))
+        add(parallelSearch(dataset, options.k, options.ef, listOf(1, 2, 4, 8, 16)))
         println("running: corpus hardness")
         add(hardnessSweep(minOf(options.vectors, 10_000), options.dimensions, options.queries, options.k, options.ef))
     }

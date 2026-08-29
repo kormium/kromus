@@ -250,3 +250,61 @@ fun incrementalPersistence(dataset: Dataset, batchSizes: List<Int>): Report {
     }
     return report
 }
+
+/**
+ * What searching on several cores buys, and what guarding it costs.
+ *
+ * A search reads the graph and nothing else, but its working state — visited marks, candidate heaps,
+ * layer buffers — is what makes it fast, and while that state lived on the index two searches could
+ * not run at once. A `searcher()` owns its own, so this measures the ceiling: no locks, one searcher
+ * per thread, one shared index. The guarded wrappers in kromus-sync land within a fifth of it.
+ */
+fun parallelSearch(dataset: Dataset, k: Int, ef: Int, threadCounts: List<Int>): Report {
+    val report = Report("Parallel search")
+    report.note(
+        "One index, one searcher per thread, no lock — the ceiling a guarded wrapper works towards. " +
+            "How far it scales depends on whether the working set still fits cache: a small index keeps " +
+            "gaining past the physical cores, a large one stops earlier and can go backwards. Read the " +
+            "row where your corpus is, not the last one.",
+    )
+    report.columns("threads", "searches/sec", "vs 1 thread", "mean query")
+
+    val index = VectorIndex<Int>(dataset.dimensions)
+    for (i in dataset.vectors.indices) index.add(i, dataset.vectors[i])
+
+    val perThread = 2_000
+
+    fun run(threads: Int): Double {
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(threads)
+        val tasks = (0 until threads).map { t ->
+            java.util.concurrent.Callable {
+                val searcher = index.searcher()
+                var sink = 0
+                repeat(perThread) { r ->
+                    sink += searcher.search(dataset.queries[(t * perThread + r) % dataset.queries.size], k, ef).size
+                }
+                sink
+            }
+        }
+        pool.invokeAll(tasks).forEach { it.get() } // warm up
+        val started = System.nanoTime()
+        pool.invokeAll(tasks).forEach { it.get() }
+        val seconds = (System.nanoTime() - started) / 1e9
+        pool.shutdown()
+        pool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)
+        return (threads * perThread) / seconds
+    }
+
+    var baseline = 0.0
+    for (threads in threadCounts) {
+        val rate = run(threads)
+        if (baseline == 0.0) baseline = rate
+        report.row(
+            threads,
+            "%,.0f".format(rate),
+            "%.2f×".format(rate / baseline),
+            "%.0f µs".format(1_000_000.0 / (rate / threads)),
+        )
+    }
+    return report
+}
