@@ -19,11 +19,11 @@ package io.github.kromus
 // Analyzers are functions and cannot be serialized, so text/hybrid loaders take the analyzer the
 // index was built with — supply the same one for consistent query tokenization.
 
-private const val VECTOR_FORMAT: Int = 5
-private const val TEXT_FORMAT: Int = 4
+private const val VECTOR_FORMAT: Int = 6
+private const val TEXT_FORMAT: Int = 5
 
 // internal, not private: the delta decoder reads a hybrid snapshot's header to split its halves.
-internal const val HYBRID_FORMAT: Int = 3
+internal const val HYBRID_FORMAT: Int = 4
 
 /**
  * Serializes this vector index (graph + key mapping) to a byte array.
@@ -32,11 +32,15 @@ internal const val HYBRID_FORMAT: Int = 3
  * calls chain onto *these* bytes, so keep what you get back — a delta written against a snapshot you
  * discarded has nothing to be applied to.
  */
-public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
+public fun <K> VectorIndex<K>.encodeToByteArray(
+    keyCodec: KeyCodec<K>,
+    provenance: String? = null,
+): ByteArray {
     val g = graph()
     val store = g.store()
     val w = ByteWriter()
     w.header(KIND_VECTOR, VECTOR_FORMAT)
+    w.provenance(provenance)
     w.int(dimensions)
     w.byte(metric.ordinal)
     w.int(config.m)
@@ -101,9 +105,14 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
  *
  * @throws KromusFormatException if [bytes] are not a vector index this build can read.
  */
-public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): VectorIndex<K> {
+public fun <K> decodeVectorIndex(
+    bytes: ByteArray,
+    keyCodec: KeyCodec<K>,
+    expect: String? = null,
+): VectorIndex<K> {
     val r = ByteReader(bytes)
     r.header(KIND_VECTOR, VECTOR_FORMAT)
+    r.provenance(expect)
     val dimensions = r.int()
     if (dimensions < 1) throw KromusFormatException("corrupt kromus index: dimensions $dimensions")
     val metric = r.enumValue(Metric.entries, "metric")
@@ -123,8 +132,7 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
     val deleted = BooleanArray(n)
     val neighbors = ArrayList<Array<IntArray>>(n)
     for (id in 0 until n) {
-        val level = r.int()
-        if (level < 0) throw KromusFormatException("corrupt kromus index: negative level $level for node $id")
+        val level = r.level(id)
         levels[id] = level
         when (store) {
             is Float32VectorStore -> store.load(FloatArray(dimensions) { r.float() })
@@ -181,12 +189,71 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
 }
 
 /**
+ * Writes an optional provenance string. Present or absent is one byte, so "no provenance" and
+ * "provenance is the empty string" stay distinguishable.
+ */
+internal fun ByteWriter.provenance(value: String?) {
+    if (value == null) {
+        byte(0)
+    } else {
+        byte(1)
+        bytes(value.encodeToByteArray())
+    }
+}
+
+/**
+ * Reads the stored provenance and, when the caller said what it expects, refuses a mismatch.
+ *
+ * This is the guard against the failure that persistence cannot catch on its own: an index is only
+ * meaningful together with whatever produced its vectors and tokenized its text, and neither an
+ * embedding model nor an analyzer is part of the bytes. Query a corpus embedded by one model with
+ * vectors from another and nothing throws — the results are simply wrong, quietly, forever. That is
+ * the whole reason to make the caller name what it is expecting.
+ */
+internal fun ByteReader.provenance(expected: String?): String? {
+    val stored = if (byte() == 1) bytes().decodeToString() else null
+    if (expected != null && stored != expected) {
+        throw KromusFormatException(
+            "kromus index provenance mismatch: it was built as " +
+                (stored?.let { "'$it'" } ?: "(none recorded)") +
+                " but '$expected' was expected — searching it with a different embedding model or " +
+                "analyzer returns wrong results rather than failing, so this is refused",
+        )
+    }
+    return stored
+}
+
+/**
  * A string-keyed map's entries in key order — the canonical layout every encoder writes.
  *
  * String comparison is by UTF-16 code unit, which is the same relation on every target, so this
  * orders identically everywhere.
  */
 internal fun <V> Map<String, V>.canonical(): List<Map.Entry<String, V>> = entries.sortedBy { it.key }
+
+/**
+ * Reads the provenance recorded in an index blob without decoding it, or null if none was recorded.
+ *
+ * For telling a user *which* index they have — the server that built it, the model it was embedded
+ * with — before deciding whether to download a new one.
+ *
+ * @throws KromusFormatException if [bytes] are not a kromus index this build can read.
+ */
+public fun provenanceOf(bytes: ByteArray): String? {
+    val r = ByteReader(bytes)
+    if (r.remaining < 6) throw KromusFormatException("not a kromus index: only ${r.remaining} byte(s)")
+    val kind = ByteReader(bytes).let { it.byte(); it.byte(); it.byte(); it.byte(); it.byte() }
+    r.header(kind, formatOf(kind))
+    return r.provenance(null)
+}
+
+/** The format version this build writes for [kind]. */
+private fun formatOf(kind: Int): Int = when (kind) {
+    KIND_VECTOR -> VECTOR_FORMAT
+    KIND_TEXT -> TEXT_FORMAT
+    KIND_HYBRID -> HYBRID_FORMAT
+    else -> throw KromusFormatException("not a readable kromus index: unknown kind $kind")
+}
 
 /** Lower bound on the bytes one persisted node occupies, used to reject absurd node counts. */
 private fun bytesPerNode(dimensions: Int, quantization: Quantization): Int {
@@ -205,9 +272,13 @@ private fun bytesPerNode(dimensions: Int, quantization: Quantization): Int {
  * Like the vector encoder this checkpoints the index, so later [encodeDelta] calls chain onto these
  * bytes — keep what you get back.
  */
-public fun <K> TextIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
+public fun <K> TextIndex<K>.encodeToByteArray(
+    keyCodec: KeyCodec<K>,
+    provenance: String? = null,
+): ByteArray {
     val w = ByteWriter()
     w.header(KIND_TEXT, TEXT_FORMAT)
+    w.provenance(provenance)
     w.float(config.k1)
     w.float(config.b)
 
@@ -248,9 +319,11 @@ public fun <K> decodeTextIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     analyzer: Analyzer = Analyzer.standard(),
+    expect: String? = null,
 ): TextIndex<K> {
     val r = ByteReader(bytes)
     r.header(KIND_TEXT, TEXT_FORMAT)
+    r.provenance(expect)
     val config = Bm25Config(r.float(), r.float())
     val index = TextIndex<K>(analyzer, config)
 
@@ -279,9 +352,14 @@ public fun <K> decodeTextIndex(
 }
 
 /** Serializes this hybrid index (both modalities) to a byte array. */
-public fun <K> HybridIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
+public fun <K> HybridIndex<K>.encodeToByteArray(
+    keyCodec: KeyCodec<K>,
+    provenance: String? = null,
+): ByteArray {
     val w = ByteWriter()
     w.header(KIND_HYBRID, HYBRID_FORMAT)
+    // Recorded once, at the level the caller actually loads; the halves carry none of their own.
+    w.provenance(provenance)
     w.int(rrfK)
     w.bytes(vectorPart().encodeToByteArray(keyCodec))
     w.bytes(textPart().encodeToByteArray(keyCodec))
@@ -298,9 +376,11 @@ public fun <K> decodeHybridIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     analyzer: Analyzer = Analyzer.standard(),
+    expect: String? = null,
 ): HybridIndex<K> {
     val r = ByteReader(bytes)
     r.header(KIND_HYBRID, HYBRID_FORMAT)
+    r.provenance(expect)
     val rrfK = r.int()
     if (rrfK < 1) throw KromusFormatException("corrupt kromus index: rrfK $rrfK")
     val vectorIndex = decodeVectorIndex<K>(r.bytes(), keyCodec)
