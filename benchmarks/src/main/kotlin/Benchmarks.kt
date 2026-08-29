@@ -259,7 +259,7 @@ fun incrementalPersistence(dataset: Dataset, batchSizes: List<Int>): Report {
  * not run at once. A `searcher()` owns its own, so this measures the ceiling: no locks, one searcher
  * per thread, one shared index. The guarded wrappers in kromus-sync land within a fifth of it.
  */
-fun parallelSearch(dataset: Dataset, k: Int, ef: Int, threadCounts: List<Int>): Report {
+fun parallelSearch(dataset: Dataset, k: Int, ef: Int, totalSearches: Int): Report {
     val report = Report("Parallel search")
     report.note(
         "One index, one searcher per thread, no lock — the ceiling a guarded wrapper works towards. " +
@@ -272,9 +272,16 @@ fun parallelSearch(dataset: Dataset, k: Int, ef: Int, threadCounts: List<Int>): 
     val index = VectorIndex<Int>(dataset.dimensions)
     for (i in dataset.vectors.indices) index.add(i, dataset.vectors[i])
 
-    val perThread = 2_000
+    // Never ask for more threads than the machine has: a sixteen-thread row on a two-core CI runner
+    // measures contention, not scaling.
+    val cores = Runtime.getRuntime().availableProcessors()
+    val threadCounts = listOf(1, 2, 4, 8, 16).filter { it <= cores }.ifEmpty { listOf(1) }
 
     fun run(threads: Int): Double {
+        // Total work is fixed rather than per-thread, so wall-clock stays roughly flat as threads go
+        // up instead of multiplying with them. Written the other way round, this benchmark ran for
+        // six hours on a CI runner and was killed by the job timeout.
+        val perThread = maxOf(1, totalSearches / threads)
         val pool = java.util.concurrent.Executors.newFixedThreadPool(threads)
         val tasks = (0 until threads).map { t ->
             java.util.concurrent.Callable {

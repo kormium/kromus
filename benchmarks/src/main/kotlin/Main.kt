@@ -43,7 +43,7 @@ fun main(args: Array<String>) {
         println("running: churn and compaction")
         add(compaction(dataset, options.k))
         add(incrementalPersistence(dataset, listOf(1, 10, 100, 1_000)))
-        add(parallelSearch(dataset, options.k, options.ef, listOf(1, 2, 4, 8, 16)))
+        add(parallelSearch(dataset, options.k, options.ef, totalSearches = options.parallelSearches))
         println("running: corpus hardness")
         add(hardnessSweep(minOf(options.vectors, 10_000), options.dimensions, options.queries, options.k, options.ef))
     }
@@ -72,6 +72,8 @@ class Options(
     val ef: Int,
     val spread: Float,
     val efValues: List<Int>,
+    /** Total searches the parallel benchmark issues, split across whatever threads it uses. */
+    val parallelSearches: Int,
 ) {
     companion object {
         fun parse(args: Array<String>): Options {
@@ -81,6 +83,7 @@ class Options(
             var k = 10
             var ef = 64
             var spread = 1f
+            var parallelSearches = 20_000
 
             var i = 0
             while (i < args.size) {
@@ -88,6 +91,7 @@ class Options(
                     "--quick" -> {
                         vectors = 5_000
                         queries = 50
+                        parallelSearches = 2_000
                     }
                     "--vectors", "-n" -> vectors = args[++i].toInt()
                     "--dim", "-d" -> dimensions = args[++i].toInt()
@@ -108,7 +112,10 @@ class Options(
                 }
                 i++
             }
-            return Options(vectors, dimensions, queries, k, ef, spread, listOf(16, 32, 64, 128, 256))
+            return Options(
+                vectors, dimensions, queries, k, ef, spread,
+                listOf(16, 32, 64, 128, 256), parallelSearches,
+            )
         }
     }
 }
