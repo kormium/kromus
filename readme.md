@@ -214,35 +214,38 @@ alongside each other, a writer runs alone, and a writer is not starved by a stea
 ### Two index types
 
 `VectorIndex` builds a graph. `ClusteredIndex` splits the corpus into groups and searches only the
-groups nearest a query. They answer the same question and trade differently:
+groups nearest a query. They answer the same question and trade differently.
 
 ```kotlin
 val index = ClusteredIndex.build(
     dimensions = 384,
     entries = documents.map { ClusterEntry(it.id, embed(it.text), it.attributes) },
-    config = ClusterConfig(nprobe = 8),
 )
 val hits = index.search(queryEmbedding, k = 10)
 ```
 
+**Nothing to tune to get started.** How many groups a query must open is a property of the data — a
+corpus that partitions cleanly needs one, a corpus that barely partitions needs dozens — so `build`
+measures the corpus and picks. `index.nprobe` is what it chose and `index.estimatedRecall` is what it
+measured that to be worth; the estimate is optimistic on hard corpora, and says so.
+
 **The graph is better in memory.** It is guided by real distances to real vectors at every hop, where
 a clustered index commits to a set of groups before looking at a single point — a neighbour just
-across a group boundary is missed unless that group happens to be probed. `nprobe` buys the recall
-back, linearly.
+across a boundary is missed unless that group is probed.
 
 **The clustered index is better on a file.** Its groups are contiguous runs of bytes, so a query reads
-a handful of runs rather than touching pages scattered across the whole index. On a 20 000-vector
-corpus a graph query touches 140 pages of the vector region and a clustered one touches 10. That
-ratio, not the recall, is what decides whether an index larger than memory is usable.
+a handful of runs rather than pages scattered across the index. At equal recall on clusterable data
+that is 10 pages against 43; see [the measurements](#graph-versus-clusters-at-equal-recall). No
+arrangement of a file gives a graph the same thing, because its access pattern is the algorithm.
 
 **It is built, not grown.** There is no `add`: clustering needs the corpus in hand, and adding without
 redoing it drifts. That matches what it is for — an index assembled on a server or in CI and shipped
 read-only. To change the contents, build again.
 
-**How much recall it gives up depends on your data**, more than on any setting. See
-[the measurements](#graph-versus-clusters): on a cleanly clustered corpus it matches the graph exactly
-while reading a fraction as much; on a corpus with little group structure it falls to 0.4 where the
-graph holds 0.88. Measure on yours before choosing.
+**When to reach for which.** If the index lives and changes in the process that queries it, use the
+graph. If it is built elsewhere and shipped, try the clustered one and look at `estimatedRecall`: a
+corpus that needs most of its groups opened is telling you it has no group structure, and the graph
+will serve it better.
 
 ### Persistence
 
@@ -467,29 +470,30 @@ the crossover is real rather than an artefact of comparing against a stale snaps
 The gap narrows as the batch grows, which is the signal to fold: once a batch is worth a sizeable
 fraction of the index, a delta stops being a bargain and a fresh snapshot is the better save.
 
-### Graph versus clusters
+### Graph versus clusters, at equal recall
 
-20 000 vectors, `k = 10`. `spread` is how far the corpus drifts from the centroids it was generated
-from: low is cleanly clustered, high is nearly structureless. It is the column to read first, because
-a synthetic corpus built *from* centroids is the best case a clustered index can meet, and saying so
-is the difference between a measurement and an advertisement.
+Comparing the two at fixed settings says nothing — a graph at `efSearch = 64` and clusters at
+`nprobe = 8` are two arbitrary points, and whichever scores better is an artefact of the corpus size.
+The question that means something is: **to return the same answers, which one reads less?** So both
+are tuned to the same target and compared on pages touched.
 
-| spread | index | recall@10 | mean query | pages/query |
+`spread` is how far the corpus drifts from the centroids it was generated from — low is cleanly
+clustered, high is nearly structureless. Read it first: a corpus built *from* centroids is the best
+case a clustered index can meet, and saying so is what separates a measurement from an advertisement.
+
+| spread | index | setting | recall@10 | pages/query |
 | --- | --- | --- | --- | --- |
-| 0.5 | HNSW | 1.000 | 152 µs | 116 |
-| 0.5 | clusters, nprobe=1 | 1.000 | 19 µs | 10 |
-| 0.5 | clusters, nprobe=8 | 1.000 | 37 µs | 72 |
-| 1.0 | HNSW | 1.000 | 74 µs | 140 |
-| 1.0 | clusters, nprobe=1 | 1.000 | 14 µs | 10 |
-| 1.0 | clusters, nprobe=8 | 1.000 | 37 µs | 71 |
-| 2.0 | HNSW | 0.880 | 95 µs | 184 |
-| 2.0 | clusters, nprobe=1 | 0.402 | 13 µs | 9 |
-| 2.0 | clusters, nprobe=8 | 0.668 | 36 µs | 75 |
+| 0.5 | HNSW | efSearch=16 | 1.000 | 43 |
+| 0.5 | clusters | nprobe=1 of 70 | 1.000 | **10** |
+| 1.0 | HNSW | efSearch=16 | 0.992 | 51 |
+| 1.0 | clusters | nprobe=1 of 70 | 1.000 | **10** |
+| 2.0 | HNSW | efSearch=128 | 0.956 | 301 |
+| 2.0 | clusters | nprobe=26 of 70 | 0.892 | 246 |
 
-"Pages" counts the distinct 4 KiB pages of the vector region a query touches — what a file-backed
-index pays for, and the one advantage clustering has that no amount of tuning gives a graph. The
-recall column is the price: where the corpus stops partitioning cleanly, the clustered index gives up
-what the graph keeps.
+Where the corpus has group structure, the clustered index answers as well for a fifth of the reading,
+and finds its own `nprobe = 1` without being told. Where it does not, the advantage nearly vanishes:
+slightly fewer pages, and less recall for them. **Which case you are in is a property of your data,
+not a setting** — build both and compare, it costs one afternoon.
 
 ### Parallel search
 

@@ -223,4 +223,59 @@ class ClusteredIndexTest {
             )
         }
     }
+
+    @Test
+    fun theProbeCountIsMeasuredFromTheCorpus() {
+        // The point of measuring rather than defaulting: how many clusters a query must open is a
+        // property of the data, and the two ends of that are far apart. A blind number is right for
+        // one and quietly wrong for the other.
+        val tight = ClusteredIndex.build(dim, entries(corpus(1500, 41, clusters = 15)))
+        val diffuse = ClusteredIndex.build(dim, entries(scattered(1500, 42)))
+
+        assertTrue(
+            tight.nprobe < diffuse.nprobe,
+            "a cleanly clustered corpus should need fewer probes than a diffuse one: " +
+                "${tight.nprobe} vs ${diffuse.nprobe}",
+        )
+        assertTrue(tight.estimatedRecall >= 0.95f, "tight corpus fell short: ${tight.estimatedRecall}")
+    }
+
+    @Test
+    fun theMeasuredProbeCountActuallyReachesItsTarget() {
+        // The measurement predicts recall on a sample; this checks the prediction against queries it
+        // never saw, because a self-fulfilling estimate would be worse than none.
+        val data = scattered(1200, 43)
+        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(targetRecall = 0.9f))
+
+        val rng = Random(44)
+        val queries = List(40) { FloatArray(dim) { rng.nextFloat() * 2f - 1f } }
+        var hits = 0
+        queries.forEach { q ->
+            val truth = exact(data, q, 10).toSet()
+            hits += index.search(q, 10).count { it.key in truth }
+        }
+        val actual = hits / (10.0 * queries.size)
+        assertTrue(actual >= 0.8, "measured nprobe=${index.nprobe} should hold up on unseen queries, got $actual")
+    }
+
+    @Test
+    fun anExplicitProbeCountIsLeftAlone() {
+        val index = ClusteredIndex.build(dim, entries(corpus(400, 45)), config = ClusterConfig(nprobe = 3))
+        assertEquals(3, index.nprobe)
+        assertTrue(index.estimatedRecall.isNaN(), "nothing was measured, so there is nothing to report")
+    }
+
+    @Test
+    fun theMeasuredProbeCountSurvivesARoundTrip() {
+        val index = ClusteredIndex.build(dim, entries(scattered(600, 46)))
+        val reloaded = decodeClusteredIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+        assertEquals(index.nprobe, reloaded.nprobe)
+        assertEquals(index.estimatedRecall, reloaded.estimatedRecall)
+    }
+
+    /** A corpus with no cluster structure to find — uniform noise, the hard end for this index. */
+    private fun scattered(n: Int, seed: Int): List<FloatArray> {
+        val rng = Random(seed)
+        return List(n) { FloatArray(dim) { rng.nextFloat() * 2f - 1f } }
+    }
 }

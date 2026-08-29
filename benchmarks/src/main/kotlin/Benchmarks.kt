@@ -320,33 +320,35 @@ fun parallelSearch(dataset: Dataset, k: Int, ef: Int, totalSearches: Int): Repor
 }
 
 /**
- * The comparison the clustered index exists to win, and the one it exists to lose.
+ * Graph against clusters, **at equal recall**.
  *
- * In memory a graph is simply better: it is guided by real distances to real vectors at every hop,
- * where a clustered index commits to a set of groups before looking at a single point. What it wins is
- * *locality* — a graph traversal goes wherever the data leads and touches pages scattered across the
- * whole vector region, while a clustered search reads a handful of contiguous runs. That is measured
- * here as distinct 4 KiB pages touched, the quantity that decides whether an index larger than memory
- * is usable at all.
+ * Comparing them at fixed settings says nothing: a graph at `efSearch = 64` and clusters at
+ * `nprobe = 8` are two arbitrary points, and whichever happens to score better is an artefact of the
+ * corpus size. The question that means something is: to return the same answers, which one reads less?
  *
- * **Read the spread column first.** This suite's corpora are generated *from* centroids, which is the
- * best case a clustered index can possibly meet — its groups can recover the structure the data was
- * built with. Sweeping the spread is what keeps that from being an advertisement: as members drift
- * from their centroids the corpus stops partitioning cleanly, and the clustered index gives up recall
- * that the graph does not. Somewhere in the middle is where real embeddings live.
+ * So both are tuned to the same target here — the clustered index measures its own probe count at
+ * build time, and the graph's `efSearch` is raised until it matches — and what is compared is the
+ * distinct 4 KiB pages of the vector region each query touches. Pages are what a file-backed index
+ * pays for, and contiguity is the one advantage clustering has that no amount of tuning gives a graph.
+ *
+ * **Read the spread column first.** These corpora are generated *from* centroids, which is the best
+ * case a clustered index can meet. Sweeping the spread is what keeps that from being an
+ * advertisement: as members drift from their centroids the structure it relies on stops being there.
  */
-fun graphVersusClusters(dimensions: Int, count: Int, queries: Int, k: Int, ef: Int): Report {
-    val report = Report("Graph versus clusters")
+fun graphVersusClusters(dimensions: Int, count: Int, queries: Int, k: Int): Report {
+    val report = Report("Graph versus clusters, at equal recall")
     report.note(
-        "Recall against exact search, and the distinct 4 KiB pages of the vector region each query " +
-            "touches — what a file-backed index actually pays for. `spread` is how far the corpus " +
-            "drifts from its generating centroids: low means cleanly clustered, which flatters the " +
-            "clustered index; high means the structure it relies on is not there.",
+        "Both tuned to the same recall — the clustered index measures its probe count from the " +
+            "corpus, the graph's efSearch is raised to match — and compared on the distinct 4 KiB " +
+            "pages of the vector region a query touches. `spread` is how far the corpus drifts from " +
+            "the centroids it was generated from: low is cleanly clustered, high is nearly " +
+            "structureless.",
     )
-    report.columns("spread", "index", "recall@$k", "mean query", "pages/query")
+    report.columns("spread", "index", "setting", "recall@$k", "pages/query")
 
     val pageSize = 4096
     val stride = dimensions * 4
+    val target = 0.95f
 
     for (spread in listOf(0.5f, 1f, 2f)) {
         val dataset = Dataset.generate(count, dimensions, queries, spread = spread)
@@ -358,59 +360,66 @@ fun graphVersusClusters(dimensions: Int, count: Int, queries: Int, k: Int, ef: I
             // touched: the traversal calls it for every candidate it considers.
             graph.add(i, dataset.vectors[i], mapOf("id" to i.toString()))
         }
-        var graphHits = 0
-        var graphPages = 0L
-        for ((qi, q) in dataset.queries.withIndex()) {
-            val pages = HashSet<Int>()
-            val hits = graph.search(
-                q,
-                k,
-                ef,
-                filter = { attrs ->
-                    attrs["id"]?.toInt()?.let { id -> pages.add((id.toLong() * stride / pageSize).toInt()) }
-                    true
-                },
-            )
-            graphHits += hits.count { it.key in truth[qi] }
-            graphPages += pages.size
+
+        fun graphAt(ef: Int): Pair<Double, Long> {
+            var hits = 0
+            var pages = 0L
+            for ((qi, q) in dataset.queries.withIndex()) {
+                val touched = HashSet<Int>()
+                val found = graph.search(
+                    q,
+                    k,
+                    ef,
+                    filter = { attrs ->
+                        attrs["id"]?.toInt()?.let { id -> touched.add((id.toLong() * stride / pageSize).toInt()) }
+                        true
+                    },
+                )
+                hits += found.count { it.key in truth[qi] }
+                pages += touched.size
+            }
+            return hits / (k.toDouble() * dataset.queries.size) to pages / dataset.queries.size
         }
-        val graphLatencies = Timing.latencies(dataset.queries.size) { qi ->
-            graph.search(dataset.queries[qi], k, ef)
+
+        // Raise efSearch until the graph reaches the same target the clustered index was built for.
+        var ef = 16
+        var graphResult = graphAt(ef)
+        while (graphResult.first < target && ef < 4096) {
+            ef *= 2
+            graphResult = graphAt(ef)
         }
         report.row(
             "%.1f".format(spread),
             "HNSW",
-            "%.3f".format(graphHits / (k.toDouble() * dataset.queries.size)),
-            "%.0f µs".format(graphLatencies.mean()),
-            "%,d".format(graphPages / dataset.queries.size),
+            "efSearch=$ef",
+            "%.3f".format(graphResult.first),
+            "%,d".format(graphResult.second),
         )
 
-        val entries = dataset.vectors.mapIndexed { i, v -> ClusterEntry(i, v) }
-        for (nprobe in listOf(1, 8)) {
-            val clustered = ClusteredIndex.build(dimensions, entries, config = ClusterConfig(nprobe = nprobe))
-            var hits = 0
-            var clusterPages = 0L
-            for ((qi, q) in dataset.queries.withIndex()) {
-                hits += clustered.search(q, k).count { it.key in truth[qi] }
-                // Counted, not estimated: k-means makes no promise that its groups are the same size.
-                var pages = 0L
-                for (c in clustered.probedClusters(q, nprobe)) {
-                    val bytes = clustered.clusterSize(c).toLong() * stride
-                    pages += if (bytes == 0L) 0 else bytes / pageSize + 1
-                }
-                clusterPages += pages
+        val clustered = ClusteredIndex.build(
+            dimensions,
+            dataset.vectors.mapIndexed { i, v -> ClusterEntry(i, v) },
+            config = ClusterConfig(targetRecall = target),
+        )
+        var hits = 0
+        var clusterPages = 0L
+        for ((qi, q) in dataset.queries.withIndex()) {
+            hits += clustered.search(q, k).count { it.key in truth[qi] }
+            // Counted, not estimated: k-means promises nothing about how evenly it splits.
+            var pages = 0L
+            for (c in clustered.probedClusters(q)) {
+                val bytes = clustered.clusterSize(c).toLong() * stride
+                pages += if (bytes == 0L) 0 else bytes / pageSize + 1
             }
-            val latencies = Timing.latencies(dataset.queries.size) { qi ->
-                clustered.search(dataset.queries[qi], k)
-            }
-            report.row(
-                "%.1f".format(spread),
-                "clusters, nprobe=$nprobe",
-                "%.3f".format(hits / (k.toDouble() * dataset.queries.size)),
-                "%.0f µs".format(latencies.mean()),
-                "%,d".format(clusterPages / dataset.queries.size),
-            )
+            clusterPages += pages
         }
+        report.row(
+            "%.1f".format(spread),
+            "clusters",
+            "nprobe=${clustered.nprobe} of ${clustered.clusters}",
+            "%.3f".format(hits / (k.toDouble() * dataset.queries.size)),
+            "%,d".format(clusterPages / dataset.queries.size),
+        )
     }
     return report
 }

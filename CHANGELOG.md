@@ -20,9 +20,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   one touches 10, and that ratio — not recall — is what decides whether an index larger than memory is
   usable at all.
 
-  The price is recall, and how much depends on the corpus rather than on any setting. On cleanly
-  clustered data it matches the graph exactly; on data with little group structure it falls to 0.40
-  where the graph holds 0.88. `nprobe` buys it back linearly. Measure on your own data.
+  **It needs no tuning to start.** How many groups a query must open is a property of the data, so
+  `build` measures the corpus and picks: one group where the corpus partitions cleanly, dozens where
+  it barely does. A blind default cannot serve both — the same number is right for one and quietly
+  returns half the neighbours for the other. `nprobe` reports the choice and `estimatedRecall` what it
+  was measured to be worth.
+
+  That estimate is optimistic and says so. The only queries available at build time are corpus points,
+  which sit inside clusters rather than between them where a boundary can fall between a query and its
+  neighbours; the trivial self-match is excluded, which removes most of the bias but not all. On a
+  corpus with little structure a target of 0.95 lands near 0.89.
+
+  Compared at *equal recall* — both tuned to the same target, which is the only comparison that means
+  anything — a clusterable corpus is answered as well for a fifth of the pages read. A corpus without
+  group structure is not: slightly fewer pages, and less recall for them.
 
   Built, not grown: there is no `add`. Clustering needs the corpus in hand and adding without redoing
   it drifts, which suits what this is for — an index assembled on a server or in CI and shipped

@@ -35,11 +35,16 @@ public fun <K> ClusteredIndex<K>.encodeToByteArray(
         byte(metric.ordinal)
         int(config.clusters)
         int(config.nprobe)
+        float(config.targetRecall)
         long(config.seed)
         int(config.iterations)
         byte(config.quantization.ordinal)
         int(entryCount)
         int(clusterCount)
+        // The effective probe count and what it was measured to recover. Stored rather than
+        // recomputed: measuring needs the corpus, and a loaded index is meant to skip that work.
+        int(nprobe)
+        float(estimatedRecall)
     }
 
     c.section(S_CENTROIDS) { for (x in centroids) float(x) }
@@ -100,12 +105,16 @@ public fun <K> decodeClusteredIndex(
     val config = ClusterConfig(
         clusters = cfg.int(),
         nprobe = cfg.int(),
+        targetRecall = cfg.float(),
         seed = cfg.long(),
         iterations = cfg.int(),
         quantization = cfg.enumValue(Quantization.entries, "quantization"),
     )
     val n = cfg.int()
     val clusterCount = cfg.int()
+    val nprobe = cfg.int()
+    val estimatedRecall = cfg.float()
+    if (nprobe < 1) throw KromusFormatException("corrupt kromus index: nprobe $nprobe")
     if (n < 0) throw KromusFormatException("corrupt kromus index: entry count $n")
     if (clusterCount < 0) throw KromusFormatException("corrupt kromus index: cluster count $clusterCount")
 
@@ -177,5 +186,17 @@ public fun <K> decodeClusteredIndex(
         }
     }
 
-    return ClusteredIndex(dimensions, metric, config, centroids, clusterCount, starts, store, keyOf, attrsOf)
+    return ClusteredIndex(
+        dimensions,
+        metric,
+        config,
+        centroids,
+        clusterCount,
+        starts,
+        store,
+        keyOf,
+        attrsOf,
+        nprobe,
+        estimatedRecall,
+    )
 }

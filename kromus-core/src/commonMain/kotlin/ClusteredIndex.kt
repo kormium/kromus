@@ -6,8 +6,16 @@ package io.github.kromus
  * @property clusters how many groups to split the corpus into. `0` picks `sqrt(n)`, the usual
  *   starting point: enough groups that each is small, few enough that comparing a query against every
  *   centroid stays cheap.
- * @property nprobe how many groups a query looks inside. The recall knob, and the honest one — every
- *   group it skips may hold a neighbour it will therefore never find.
+ * @property nprobe how many groups a query looks inside, or `0` to have [ClusteredIndex.build] measure
+ *   the corpus and pick a value that reaches [targetRecall]. The recall knob, and the honest one —
+ *   every group it skips may hold a neighbour it will therefore never find.
+ *
+ *   How many groups it takes is a property of the data rather than of any setting: a corpus that
+ *   partitions cleanly needs one or two, a corpus with little group structure needs dozens. That is
+ *   why the default measures instead of guessing — a number chosen blind is right for one kind of
+ *   corpus and badly wrong for the other.
+ * @property targetRecall what an automatically chosen [nprobe] aims for, as a fraction of the
+ *   neighbours an exhaustive search would return. Ignored when [nprobe] is set explicitly.
  * @property seed seed for the clustering. Fixed by default, because the clustering decides the file's
  *   layout and kromus promises identical content encodes identically.
  * @property iterations k-means refinement passes. Fixed rather than run to convergence: convergence
@@ -17,14 +25,18 @@ package io.github.kromus
  */
 public data class ClusterConfig(
     val clusters: Int = 0,
-    val nprobe: Int = 8,
+    val nprobe: Int = 0,
+    val targetRecall: Float = 0.95f,
     val seed: Long = 42L,
     val iterations: Int = 10,
     val quantization: Quantization = Quantization.None,
 ) {
     init {
         require(clusters >= 0) { "clusters must be >= 0 (0 = sqrt(n)), was $clusters" }
-        require(nprobe >= 1) { "nprobe must be >= 1, was $nprobe" }
+        require(nprobe >= 0) { "nprobe must be >= 0 (0 = measure it), was $nprobe" }
+        require(targetRecall > 0f && targetRecall <= 1f) {
+            "targetRecall must be in (0, 1], was $targetRecall"
+        }
         require(iterations >= 1) { "iterations must be >= 1, was $iterations" }
     }
 }
@@ -70,6 +82,21 @@ public class ClusteredIndex<K> internal constructor(
     internal val store: VectorStore,
     internal val keyOf: List<K>,
     internal val attrsOf: List<Map<String, String>>,
+    /** Clusters a query probes unless told otherwise — measured at build time when not set. */
+    public val nprobe: Int,
+    /**
+     * What fraction of an exhaustive search's neighbours [nprobe] was measured to recover, on a
+     * sample of the corpus taken at build time.
+     *
+     * `NaN` when [nprobe] was set explicitly and nothing was measured.
+     *
+     * Optimistic by construction: the only queries available at build time are corpus points, which
+     * sit inside clusters rather than between them. On a corpus that partitions cleanly it is
+     * accurate; on one that barely partitions it runs a few points high. Either way it is worth
+     * looking at — an index that must open most of its clusters to reach its target is telling you
+     * its data has no group structure, and a graph will serve it better.
+     */
+    public val estimatedRecall: Float,
 ) {
     private val idOf: Map<K, Int> = buildMap(keyOf.size) { keyOf.forEachIndexed { id, key -> put(key, id) } }
 
@@ -92,7 +119,7 @@ public class ClusteredIndex<K> internal constructor(
      * for diagnosing a query that returns too little, and for measuring what a file-backed index costs
      * without guessing that clusters are evenly sized — k-means offers no such promise.
      */
-    public fun probedClusters(query: FloatArray, nprobe: Int = config.nprobe): IntArray {
+    public fun probedClusters(query: FloatArray, nprobe: Int = this.nprobe): IntArray {
         require(query.size == dimensions) { "query has ${query.size} dimensions, expected $dimensions" }
         if (clusterCount == 0) return IntArray(0)
         return nearestClusters(prepare(query), if (nprobe > clusterCount) clusterCount else nprobe)
@@ -117,7 +144,7 @@ public class ClusteredIndex<K> internal constructor(
     public fun search(
         query: FloatArray,
         k: Int,
-        nprobe: Int = config.nprobe,
+        nprobe: Int = this.nprobe,
         filter: MetadataFilter? = null,
     ): List<SearchResult<K>> {
         require(query.size == dimensions) { "query has ${query.size} dimensions, expected $dimensions" }
@@ -208,6 +235,12 @@ public class ClusteredIndex<K> internal constructor(
                 attrsOf.add(entries[i].attributes)
             }
 
+            val measured = if (config.nprobe > 0) {
+                config.nprobe to Float.NaN
+            } else {
+                chooseNprobe(store, clustering, starts, dimensions, metric, config.targetRecall)
+            }
+
             return ClusteredIndex(
                 dimensions,
                 metric,
@@ -218,7 +251,105 @@ public class ClusteredIndex<K> internal constructor(
                 store,
                 keyOf,
                 attrsOf,
+                measured.first,
+                measured.second,
             )
+        }
+
+        /** How many sample queries the automatic choice is measured over. */
+        private const val PROBE_SAMPLES = 64
+
+        /** Neighbours per sample the automatic choice tries to recover. */
+        private const val PROBE_K = 10
+
+        /**
+         * Picks the smallest `nprobe` that recovers [targetRecall] of an exhaustive search, measured
+         * on the corpus itself.
+         *
+         * A blind default cannot be right here: how many clusters a query must open is a property of
+         * the data. A corpus that partitions cleanly needs one; a corpus that barely partitions needs
+         * dozens, and would silently return half its neighbours at the same setting.
+         *
+         * The whole curve comes out of a single pass. For a sample query, rank every cluster by
+         * distance to its centroid, then ask where each of its true neighbours sits in that ranking:
+         * recall at `nprobe` is simply the share of neighbours ranked inside the first `nprobe`. No
+         * search has to be run per candidate value.
+         *
+         * Samples are taken at a fixed stride rather than at random, so the choice is as reproducible
+         * as everything else that decides the layout.
+         *
+         * **The estimate is optimistic, and knowingly so.** The only queries available at build time
+         * are the corpus itself, and a corpus point is an easier query than a real one: it sits inside
+         * a cluster rather than between them, where a boundary can fall between a query and its
+         * neighbours. Its own trivial self-match is excluded, which removes the largest part of the
+         * bias, but not all of it — measured against held-out queries on a corpus with little cluster
+         * structure, a target of 0.95 lands near 0.89.
+         *
+         * Attempts to make the samples harder all need an arbitrary constant (how far from a point is
+         * a realistic query?), and a wrong constant is worse than a known bias. So the shortfall is
+         * reported through [estimatedRecall] rather than papered over: on a corpus where the automatic
+         * choice has to open most of the clusters, treat the number as an upper bound and measure on
+         * your own queries.
+         */
+        private fun chooseNprobe(
+            store: VectorStore,
+            clustering: Clustering,
+            starts: IntArray,
+            dimensions: Int,
+            metric: Metric,
+            targetRecall: Float,
+        ): Pair<Int, Float> {
+            val n = store.size
+            val k = clustering.k
+            if (n == 0 || k <= 1) return 1 to 1f
+
+            val clusterOf = IntArray(n)
+            for (c in 0 until k) {
+                for (id in starts[c] until starts[c + 1]) clusterOf[id] = c
+            }
+
+            val sampleCount = if (n < PROBE_SAMPLES) n else PROBE_SAMPLES
+            val stride = n / sampleCount
+            // ranksAt[r] counts neighbours whose cluster was ranked r-th; the running sum over r is
+            // then the recall at nprobe = r + 1.
+            val ranksAt = IntArray(k)
+            var neighbours = 0
+
+            val distances = FloatArray(n)
+            val clusterDistance = FloatArray(k)
+            for (s in 0 until sampleCount) {
+                val anchor = s * stride
+                val query = store.reconstruct(anchor)
+                for (i in 0 until n) distances[i] = store.distanceToQuery(query, i)
+                // The anchor is its own nearest neighbour at distance zero, inside the cluster its
+                // query probes first. Counting it would buy a hit in ten for free.
+                val truth = (0 until n)
+                    .sortedWith(compareBy({ distances[it] }, { it }))
+                    .filter { it != anchor }
+                    .take(PROBE_K)
+
+                for (c in 0 until k) {
+                    clusterDistance[c] =
+                        Kmeans.distanceToCentroid(query, clustering.centroids, c * dimensions, dimensions, metric)
+                }
+                val order = (0 until k).sortedWith(compareBy({ clusterDistance[it] }, { it }))
+                val rankOf = IntArray(k)
+                order.forEachIndexed { rank, cluster -> rankOf[cluster] = rank }
+
+                for (id in truth) {
+                    ranksAt[rankOf[clusterOf[id]]]++
+                    neighbours++
+                }
+            }
+
+            var covered = 0
+            for (r in 0 until k) {
+                covered += ranksAt[r]
+                val recall = covered.toFloat() / neighbours
+                if (recall >= targetRecall) return (r + 1) to recall
+            }
+            // Even probing everything fell short, which only happens when the sample is degenerate.
+            return k to covered.toFloat() / neighbours
         }
 
         /** `sqrt(n)`, the usual starting point: groups small enough to skip, few enough to scan. */

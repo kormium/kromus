@@ -52,7 +52,6 @@ fun main(args: Array<String>) {
                 minOf(options.vectors, 20_000),
                 options.queries,
                 options.k,
-                options.ef,
             ),
         )
         println("running: corpus hardness")
