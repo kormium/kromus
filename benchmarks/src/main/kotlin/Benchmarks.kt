@@ -1,5 +1,8 @@
 package io.github.kromus.benchmarks
 
+import io.github.kromus.ClusterConfig
+import io.github.kromus.ClusterEntry
+import io.github.kromus.ClusteredIndex
 import io.github.kromus.HnswConfig
 import io.github.kromus.KeyCodec
 import io.github.kromus.Quantization
@@ -312,6 +315,102 @@ fun parallelSearch(dataset: Dataset, k: Int, ef: Int, totalSearches: Int): Repor
             "%.2f×".format(rate / baseline),
             "%.0f µs".format(1_000_000.0 / (rate / threads)),
         )
+    }
+    return report
+}
+
+/**
+ * The comparison the clustered index exists to win, and the one it exists to lose.
+ *
+ * In memory a graph is simply better: it is guided by real distances to real vectors at every hop,
+ * where a clustered index commits to a set of groups before looking at a single point. What it wins is
+ * *locality* — a graph traversal goes wherever the data leads and touches pages scattered across the
+ * whole vector region, while a clustered search reads a handful of contiguous runs. That is measured
+ * here as distinct 4 KiB pages touched, the quantity that decides whether an index larger than memory
+ * is usable at all.
+ *
+ * **Read the spread column first.** This suite's corpora are generated *from* centroids, which is the
+ * best case a clustered index can possibly meet — its groups can recover the structure the data was
+ * built with. Sweeping the spread is what keeps that from being an advertisement: as members drift
+ * from their centroids the corpus stops partitioning cleanly, and the clustered index gives up recall
+ * that the graph does not. Somewhere in the middle is where real embeddings live.
+ */
+fun graphVersusClusters(dimensions: Int, count: Int, queries: Int, k: Int, ef: Int): Report {
+    val report = Report("Graph versus clusters")
+    report.note(
+        "Recall against exact search, and the distinct 4 KiB pages of the vector region each query " +
+            "touches — what a file-backed index actually pays for. `spread` is how far the corpus " +
+            "drifts from its generating centroids: low means cleanly clustered, which flatters the " +
+            "clustered index; high means the structure it relies on is not there.",
+    )
+    report.columns("spread", "index", "recall@$k", "mean query", "pages/query")
+
+    val pageSize = 4096
+    val stride = dimensions * 4
+
+    for (spread in listOf(0.5f, 1f, 2f)) {
+        val dataset = Dataset.generate(count, dimensions, queries, spread = spread)
+        val truth = dataset.groundTruth(k).map { it.toSet() }
+
+        val graph = VectorIndex<Int>(dimensions)
+        for (i in dataset.vectors.indices) {
+            // The id travels as an attribute so the filter callback can record which nodes a query
+            // touched: the traversal calls it for every candidate it considers.
+            graph.add(i, dataset.vectors[i], mapOf("id" to i.toString()))
+        }
+        var graphHits = 0
+        var graphPages = 0L
+        for ((qi, q) in dataset.queries.withIndex()) {
+            val pages = HashSet<Int>()
+            val hits = graph.search(
+                q,
+                k,
+                ef,
+                filter = { attrs ->
+                    attrs["id"]?.toInt()?.let { id -> pages.add((id.toLong() * stride / pageSize).toInt()) }
+                    true
+                },
+            )
+            graphHits += hits.count { it.key in truth[qi] }
+            graphPages += pages.size
+        }
+        val graphLatencies = Timing.latencies(dataset.queries.size) { qi ->
+            graph.search(dataset.queries[qi], k, ef)
+        }
+        report.row(
+            "%.1f".format(spread),
+            "HNSW",
+            "%.3f".format(graphHits / (k.toDouble() * dataset.queries.size)),
+            "%.0f µs".format(graphLatencies.mean()),
+            "%,d".format(graphPages / dataset.queries.size),
+        )
+
+        val entries = dataset.vectors.mapIndexed { i, v -> ClusterEntry(i, v) }
+        for (nprobe in listOf(1, 8)) {
+            val clustered = ClusteredIndex.build(dimensions, entries, config = ClusterConfig(nprobe = nprobe))
+            var hits = 0
+            var clusterPages = 0L
+            for ((qi, q) in dataset.queries.withIndex()) {
+                hits += clustered.search(q, k).count { it.key in truth[qi] }
+                // Counted, not estimated: k-means makes no promise that its groups are the same size.
+                var pages = 0L
+                for (c in clustered.probedClusters(q, nprobe)) {
+                    val bytes = clustered.clusterSize(c).toLong() * stride
+                    pages += if (bytes == 0L) 0 else bytes / pageSize + 1
+                }
+                clusterPages += pages
+            }
+            val latencies = Timing.latencies(dataset.queries.size) { qi ->
+                clustered.search(dataset.queries[qi], k)
+            }
+            report.row(
+                "%.1f".format(spread),
+                "clusters, nprobe=$nprobe",
+                "%.3f".format(hits / (k.toDouble() * dataset.queries.size)),
+                "%.0f µs".format(latencies.mean()),
+                "%,d".format(clusterPages / dataset.queries.size),
+            )
+        }
     }
     return report
 }

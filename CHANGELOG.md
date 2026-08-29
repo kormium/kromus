@@ -7,6 +7,57 @@ with what it takes to migrate.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once 1.0 lands.
 
+## [Unreleased]
+
+### Added
+
+- **`ClusteredIndex`** — a second index type that groups the corpus instead of linking it into a
+  graph, searching only the groups nearest a query.
+
+  It exists for one property a graph cannot have: **contiguity**. A graph traversal goes wherever the
+  data leads, so on a file it touches pages scattered across the whole vector region; a clustered
+  search reads a handful of runs. At 20 000 vectors a graph query touches 140 pages and a clustered
+  one touches 10, and that ratio — not recall — is what decides whether an index larger than memory is
+  usable at all.
+
+  The price is recall, and how much depends on the corpus rather than on any setting. On cleanly
+  clustered data it matches the graph exactly; on data with little group structure it falls to 0.40
+  where the graph holds 0.88. `nprobe` buys it back linearly. Measure on your own data.
+
+  Built, not grown: there is no `add`. Clustering needs the corpus in hand and adding without redoing
+  it drifts, which suits what this is for — an index assembled on a server or in CI and shipped
+  read-only.
+
+  Clustering is reproducible by construction: seeded initialisation, a fixed iteration count rather
+  than convergence (which depends on floating-point details that differ between targets), ties to the
+  lower index, and a determined re-seed for an emptied group. Without that the layout would vary and
+  with it the bytes.
+
+- **`ClusteredIndex.probedClusters`** and **`clusterSize`** — what a query will actually read. Each
+  cluster is a contiguous run, so the probe list *is* the read plan; useful for sizing a cache and for
+  measuring a file-backed index without assuming clusters are evenly sized, which k-means never
+  promises.
+
+### Changed
+
+- **Every index is now a container of named sections** rather than one interleaved stream. Sections
+  are homogeneous, so fields are sized for what they hold rather than for the widest thing beside
+  them; each carries a checksum, so corruption is located rather than merely noticed; and each is
+  contiguous, so a reader can take the graph without the vectors.
+
+  A node level is two bytes rather than four, a deleted flag one bit rather than eight, a neighbour
+  count two bytes, and a neighbour link two bytes wherever the index holds 65 536 nodes or fewer.
+  Every integer is read unsigned — with a signed short that last threshold would be 32 768, and links
+  are the whole of the adjacency section. Measured at 50 000 vectors × 128 dimensions: **30.7 → 27.8
+  MiB** full precision, **12.5 → 9.7 MiB** int8, **7.0 → 4.2 MiB** binary.
+
+  Tags are four ASCII characters, so a hex dump of an index is readable by eye.
+
+### Migration
+
+- **The persistence format changed** (vector v7, text v6, hybrid v5) and 0.16.0 blobs cannot be read.
+  They are rejected with a `KromusFormatException`; catch it and rebuild, as before.
+
 ## [0.16.0] — 2026-08-29
 
 ### Added

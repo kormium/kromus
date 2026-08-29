@@ -44,6 +44,17 @@ fun main(args: Array<String>) {
         add(compaction(dataset, options.k))
         add(incrementalPersistence(dataset, listOf(1, 10, 100, 1_000)))
         add(parallelSearch(dataset, options.k, options.ef, totalSearches = options.parallelSearches))
+        add(
+            graphVersusClusters(
+                options.dimensions,
+                // Capped: this one builds several corpora and two index types over each, so the full
+                // corpus size would dominate the suite's runtime without changing what it shows.
+                minOf(options.vectors, 20_000),
+                options.queries,
+                options.k,
+                options.ef,
+            ),
+        )
         println("running: corpus hardness")
         add(hardnessSweep(minOf(options.vectors, 10_000), options.dimensions, options.queries, options.k, options.ef))
     }

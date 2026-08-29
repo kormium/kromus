@@ -24,6 +24,64 @@ public final class io/github/kromus/Bm25Config {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kromus/ClusterConfig {
+	public fun <init> ()V
+	public fun <init> (IIJILio/github/kromus/Quantization;)V
+	public synthetic fun <init> (IIJILio/github/kromus/Quantization;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()J
+	public final fun component4 ()I
+	public final fun component5 ()Lio/github/kromus/Quantization;
+	public final fun copy (IIJILio/github/kromus/Quantization;)Lio/github/kromus/ClusterConfig;
+	public static synthetic fun copy$default (Lio/github/kromus/ClusterConfig;IIJILio/github/kromus/Quantization;ILjava/lang/Object;)Lio/github/kromus/ClusterConfig;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClusters ()I
+	public final fun getIterations ()I
+	public final fun getNprobe ()I
+	public final fun getQuantization ()Lio/github/kromus/Quantization;
+	public final fun getSeed ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kromus/ClusterEntry {
+	public fun <init> (Ljava/lang/Object;[FLjava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/Object;[FLjava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getKey ()Ljava/lang/Object;
+	public final fun getVector ()[F
+}
+
+public final class io/github/kromus/ClusteredIndex {
+	public static final field Companion Lio/github/kromus/ClusteredIndex$Companion;
+	public final fun attributesOf (Ljava/lang/Object;)Ljava/util/Map;
+	public final fun clusterSize (I)I
+	public final fun contains (Ljava/lang/Object;)Z
+	public final fun getClusters ()I
+	public final fun getConfig ()Lio/github/kromus/ClusterConfig;
+	public final fun getDimensions ()I
+	public final fun getKeys ()Ljava/util/Set;
+	public final fun getMetric ()Lio/github/kromus/Metric;
+	public final fun getSize ()I
+	public final fun probedClusters ([FI)[I
+	public static synthetic fun probedClusters$default (Lio/github/kromus/ClusteredIndex;[FIILjava/lang/Object;)[I
+	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/ClusteredIndex;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class io/github/kromus/ClusteredIndex$Companion {
+	public final fun build (ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/ClusterConfig;)Lio/github/kromus/ClusteredIndex;
+	public static synthetic fun build$default (Lio/github/kromus/ClusteredIndex$Companion;ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/ClusterConfig;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
+}
+
+public final class io/github/kromus/ClusteredPersistenceKt {
+	public static final fun decodeClusteredIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/ClusteredIndex;
+	public static synthetic fun decodeClusteredIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
+	public static final fun encodeToByteArray (Lio/github/kromus/ClusteredIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
+	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/ClusteredIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+}
+
 public final class io/github/kromus/HnswConfig {
 	public fun <init> ()V
 	public fun <init> (IIIJLio/github/kromus/Quantization;I)V

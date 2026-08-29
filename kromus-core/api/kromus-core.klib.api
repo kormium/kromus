@@ -61,6 +61,42 @@ abstract interface <#A: kotlin/Any?> io.github.kromus/KeyCodec { // io.github.kr
     }
 }
 
+final class <#A: kotlin/Any?> io.github.kromus/ClusterEntry { // io.github.kromus/ClusterEntry|null[0]
+    constructor <init>(#A, kotlin/FloatArray, kotlin.collections/Map<kotlin/String, kotlin/String> = ...) // io.github.kromus/ClusterEntry.<init>|<init>(1:0;kotlin.FloatArray;kotlin.collections.Map<kotlin.String,kotlin.String>){}[0]
+
+    final val attributes // io.github.kromus/ClusterEntry.attributes|{}attributes[0]
+        final fun <get-attributes>(): kotlin.collections/Map<kotlin/String, kotlin/String> // io.github.kromus/ClusterEntry.attributes.<get-attributes>|<get-attributes>(){}[0]
+    final val key // io.github.kromus/ClusterEntry.key|{}key[0]
+        final fun <get-key>(): #A // io.github.kromus/ClusterEntry.key.<get-key>|<get-key>(){}[0]
+    final val vector // io.github.kromus/ClusterEntry.vector|{}vector[0]
+        final fun <get-vector>(): kotlin/FloatArray // io.github.kromus/ClusterEntry.vector.<get-vector>|<get-vector>(){}[0]
+}
+
+final class <#A: kotlin/Any?> io.github.kromus/ClusteredIndex { // io.github.kromus/ClusteredIndex|null[0]
+    final val clusters // io.github.kromus/ClusteredIndex.clusters|{}clusters[0]
+        final fun <get-clusters>(): kotlin/Int // io.github.kromus/ClusteredIndex.clusters.<get-clusters>|<get-clusters>(){}[0]
+    final val config // io.github.kromus/ClusteredIndex.config|{}config[0]
+        final fun <get-config>(): io.github.kromus/ClusterConfig // io.github.kromus/ClusteredIndex.config.<get-config>|<get-config>(){}[0]
+    final val dimensions // io.github.kromus/ClusteredIndex.dimensions|{}dimensions[0]
+        final fun <get-dimensions>(): kotlin/Int // io.github.kromus/ClusteredIndex.dimensions.<get-dimensions>|<get-dimensions>(){}[0]
+    final val keys // io.github.kromus/ClusteredIndex.keys|{}keys[0]
+        final fun <get-keys>(): kotlin.collections/Set<#A> // io.github.kromus/ClusteredIndex.keys.<get-keys>|<get-keys>(){}[0]
+    final val metric // io.github.kromus/ClusteredIndex.metric|{}metric[0]
+        final fun <get-metric>(): io.github.kromus/Metric // io.github.kromus/ClusteredIndex.metric.<get-metric>|<get-metric>(){}[0]
+    final val size // io.github.kromus/ClusteredIndex.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // io.github.kromus/ClusteredIndex.size.<get-size>|<get-size>(){}[0]
+
+    final fun attributesOf(#A): kotlin.collections/Map<kotlin/String, kotlin/String>? // io.github.kromus/ClusteredIndex.attributesOf|attributesOf(1:0){}[0]
+    final fun clusterSize(kotlin/Int): kotlin/Int // io.github.kromus/ClusteredIndex.clusterSize|clusterSize(kotlin.Int){}[0]
+    final fun contains(#A): kotlin/Boolean // io.github.kromus/ClusteredIndex.contains|contains(1:0){}[0]
+    final fun probedClusters(kotlin/FloatArray, kotlin/Int = ...): kotlin/IntArray // io.github.kromus/ClusteredIndex.probedClusters|probedClusters(kotlin.FloatArray;kotlin.Int){}[0]
+    final fun search(kotlin/FloatArray, kotlin/Int, kotlin/Int = ..., kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/ClusteredIndex.search|search(kotlin.FloatArray;kotlin.Int;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
+
+    final object Companion { // io.github.kromus/ClusteredIndex.Companion|null[0]
+        final fun <#A2: kotlin/Any?> build(kotlin/Int, kotlin.collections/List<io.github.kromus/ClusterEntry<#A2>>, io.github.kromus/Metric = ..., io.github.kromus/ClusterConfig = ...): io.github.kromus/ClusteredIndex<#A2> // io.github.kromus/ClusteredIndex.Companion.build|build(kotlin.Int;kotlin.collections.List<io.github.kromus.ClusterEntry<0:0>>;io.github.kromus.Metric;io.github.kromus.ClusterConfig){0§<kotlin.Any?>}[0]
+    }
+}
+
 final class <#A: kotlin/Any?> io.github.kromus/HybridIndex { // io.github.kromus/HybridIndex|null[0]
     constructor <init>(kotlin/Int, io.github.kromus/Metric = ..., io.github.kromus/HnswConfig = ..., io.github.kromus/Analyzer = ..., io.github.kromus/Bm25Config = ..., kotlin/Int = ...) // io.github.kromus/HybridIndex.<init>|<init>(kotlin.Int;io.github.kromus.Metric;io.github.kromus.HnswConfig;io.github.kromus.Analyzer;io.github.kromus.Bm25Config;kotlin.Int){}[0]
 
@@ -196,6 +232,31 @@ final class io.github.kromus/Bm25Config { // io.github.kromus/Bm25Config|null[0]
     final fun toString(): kotlin/String // io.github.kromus/Bm25Config.toString|toString(){}[0]
 }
 
+final class io.github.kromus/ClusterConfig { // io.github.kromus/ClusterConfig|null[0]
+    constructor <init>(kotlin/Int = ..., kotlin/Int = ..., kotlin/Long = ..., kotlin/Int = ..., io.github.kromus/Quantization = ...) // io.github.kromus/ClusterConfig.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Long;kotlin.Int;io.github.kromus.Quantization){}[0]
+
+    final val clusters // io.github.kromus/ClusterConfig.clusters|{}clusters[0]
+        final fun <get-clusters>(): kotlin/Int // io.github.kromus/ClusterConfig.clusters.<get-clusters>|<get-clusters>(){}[0]
+    final val iterations // io.github.kromus/ClusterConfig.iterations|{}iterations[0]
+        final fun <get-iterations>(): kotlin/Int // io.github.kromus/ClusterConfig.iterations.<get-iterations>|<get-iterations>(){}[0]
+    final val nprobe // io.github.kromus/ClusterConfig.nprobe|{}nprobe[0]
+        final fun <get-nprobe>(): kotlin/Int // io.github.kromus/ClusterConfig.nprobe.<get-nprobe>|<get-nprobe>(){}[0]
+    final val quantization // io.github.kromus/ClusterConfig.quantization|{}quantization[0]
+        final fun <get-quantization>(): io.github.kromus/Quantization // io.github.kromus/ClusterConfig.quantization.<get-quantization>|<get-quantization>(){}[0]
+    final val seed // io.github.kromus/ClusterConfig.seed|{}seed[0]
+        final fun <get-seed>(): kotlin/Long // io.github.kromus/ClusterConfig.seed.<get-seed>|<get-seed>(){}[0]
+
+    final fun component1(): kotlin/Int // io.github.kromus/ClusterConfig.component1|component1(){}[0]
+    final fun component2(): kotlin/Int // io.github.kromus/ClusterConfig.component2|component2(){}[0]
+    final fun component3(): kotlin/Long // io.github.kromus/ClusterConfig.component3|component3(){}[0]
+    final fun component4(): kotlin/Int // io.github.kromus/ClusterConfig.component4|component4(){}[0]
+    final fun component5(): io.github.kromus/Quantization // io.github.kromus/ClusterConfig.component5|component5(){}[0]
+    final fun copy(kotlin/Int = ..., kotlin/Int = ..., kotlin/Long = ..., kotlin/Int = ..., io.github.kromus/Quantization = ...): io.github.kromus/ClusterConfig // io.github.kromus/ClusterConfig.copy|copy(kotlin.Int;kotlin.Int;kotlin.Long;kotlin.Int;io.github.kromus.Quantization){}[0]
+    final fun equals(kotlin/Any?): kotlin/Boolean // io.github.kromus/ClusterConfig.equals|equals(kotlin.Any?){}[0]
+    final fun hashCode(): kotlin/Int // io.github.kromus/ClusterConfig.hashCode|hashCode(){}[0]
+    final fun toString(): kotlin/String // io.github.kromus/ClusterConfig.toString|toString(){}[0]
+}
+
 final class io.github.kromus/HnswConfig { // io.github.kromus/HnswConfig|null[0]
     constructor <init>(kotlin/Int = ..., kotlin/Int = ..., kotlin/Int = ..., kotlin/Long = ..., io.github.kromus/Quantization = ..., kotlin/Int = ...) // io.github.kromus/HnswConfig.<init>|<init>(kotlin.Int;kotlin.Int;kotlin.Int;kotlin.Long;io.github.kromus.Quantization;kotlin.Int){}[0]
 
@@ -240,12 +301,14 @@ final object io.github.kromus/Stopwords { // io.github.kromus/Stopwords|null[0]
         final fun <get-english>(): kotlin.collections/Set<kotlin/String> // io.github.kromus/Stopwords.english.<get-english>|<get-english>(){}[0]
 }
 
+final fun <#A: kotlin/Any?> (io.github.kromus/ClusteredIndex<#A>).io.github.kromus/encodeToByteArray(io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): kotlin/ByteArray // io.github.kromus/encodeToByteArray|encodeToByteArray@io.github.kromus.ClusteredIndex<0:0>(io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/HybridIndex<#A>).io.github.kromus/encodeDelta(io.github.kromus/KeyCodec<#A>): kotlin/ByteArray? // io.github.kromus/encodeDelta|encodeDelta@io.github.kromus.HybridIndex<0:0>(io.github.kromus.KeyCodec<0:0>){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/HybridIndex<#A>).io.github.kromus/encodeToByteArray(io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): kotlin/ByteArray // io.github.kromus/encodeToByteArray|encodeToByteArray@io.github.kromus.HybridIndex<0:0>(io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/TextIndex<#A>).io.github.kromus/encodeDelta(io.github.kromus/KeyCodec<#A>): kotlin/ByteArray? // io.github.kromus/encodeDelta|encodeDelta@io.github.kromus.TextIndex<0:0>(io.github.kromus.KeyCodec<0:0>){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/TextIndex<#A>).io.github.kromus/encodeToByteArray(io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): kotlin/ByteArray // io.github.kromus/encodeToByteArray|encodeToByteArray@io.github.kromus.TextIndex<0:0>(io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/VectorIndex<#A>).io.github.kromus/encodeDelta(io.github.kromus/KeyCodec<#A>): kotlin/ByteArray? // io.github.kromus/encodeDelta|encodeDelta@io.github.kromus.VectorIndex<0:0>(io.github.kromus.KeyCodec<0:0>){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/VectorIndex<#A>).io.github.kromus/encodeToByteArray(io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): kotlin/ByteArray // io.github.kromus/encodeToByteArray|encodeToByteArray@io.github.kromus.VectorIndex<0:0>(io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> io.github.kromus/decodeClusteredIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): io.github.kromus/ClusteredIndex<#A> // io.github.kromus/decodeClusteredIndex|decodeClusteredIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/decodeHybridIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, io.github.kromus/Analyzer = ..., kotlin/String? = ...): io.github.kromus/HybridIndex<#A> // io.github.kromus/decodeHybridIndex|decodeHybridIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;io.github.kromus.Analyzer;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/decodeHybridIndex(kotlin/ByteArray, kotlin.collections/List<kotlin/ByteArray>, io.github.kromus/KeyCodec<#A>, io.github.kromus/Analyzer = ..., kotlin/String? = ...): io.github.kromus/HybridIndex<#A> // io.github.kromus/decodeHybridIndex|decodeHybridIndex(kotlin.ByteArray;kotlin.collections.List<kotlin.ByteArray>;io.github.kromus.KeyCodec<0:0>;io.github.kromus.Analyzer;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/decodeTextIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, io.github.kromus/Analyzer = ..., kotlin/String? = ...): io.github.kromus/TextIndex<#A> // io.github.kromus/decodeTextIndex|decodeTextIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;io.github.kromus.Analyzer;kotlin.String?){0§<kotlin.Any?>}[0]

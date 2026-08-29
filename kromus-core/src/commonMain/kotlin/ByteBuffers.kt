@@ -26,8 +26,14 @@ internal class ByteWriter(
         buf[pos++] = value.toByte()
     }
 
-    /** Bytes written so far. */
-    val size: Int get() = pos
+    /**
+     * Bytes written so far.
+     *
+     * Named at length on purpose: this class is used as a lambda receiver, where a short name like
+     * `size` silently shadows whatever the enclosing scope calls `size` — and produces an empty
+     * section rather than a compile error.
+     */
+    val bytesWritten: Int get() = pos
 
     /** Two bytes, unsigned: 0..65535. */
     fun short(value: Int) {

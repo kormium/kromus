@@ -211,6 +211,39 @@ reads parallel, not reads-and-writes concurrent. If something is writing — a s
 fresh — use [`kromus-sync`](kromus-sync/)'s `.concurrent()` wrapper, which arranges both: searches run
 alongside each other, a writer runs alone, and a writer is not starved by a steady stream of searches.
 
+### Two index types
+
+`VectorIndex` builds a graph. `ClusteredIndex` splits the corpus into groups and searches only the
+groups nearest a query. They answer the same question and trade differently:
+
+```kotlin
+val index = ClusteredIndex.build(
+    dimensions = 384,
+    entries = documents.map { ClusterEntry(it.id, embed(it.text), it.attributes) },
+    config = ClusterConfig(nprobe = 8),
+)
+val hits = index.search(queryEmbedding, k = 10)
+```
+
+**The graph is better in memory.** It is guided by real distances to real vectors at every hop, where
+a clustered index commits to a set of groups before looking at a single point — a neighbour just
+across a group boundary is missed unless that group happens to be probed. `nprobe` buys the recall
+back, linearly.
+
+**The clustered index is better on a file.** Its groups are contiguous runs of bytes, so a query reads
+a handful of runs rather than touching pages scattered across the whole index. On a 20 000-vector
+corpus a graph query touches 140 pages of the vector region and a clustered one touches 10. That
+ratio, not the recall, is what decides whether an index larger than memory is usable.
+
+**It is built, not grown.** There is no `add`: clustering needs the corpus in hand, and adding without
+redoing it drifts. That matches what it is for — an index assembled on a server or in CI and shipped
+read-only. To change the contents, build again.
+
+**How much recall it gives up depends on your data**, more than on any setting. See
+[the measurements](#graph-versus-clusters): on a cleanly clustered corpus it matches the graph exactly
+while reading a fraction as much; on a corpus with little group structure it falls to 0.4 where the
+graph holds 0.88. Measure on yours before choosing.
+
 ### Persistence
 
 Building an HNSW graph is expensive; persist a prebuilt index and reload it instantly (ship it with
@@ -380,10 +413,10 @@ the bytes you actually ship or cache.
 
 | mode | serialized | build | recall@10 | mean query |
 | --- | --- | --- | --- | --- |
-| `None` | 30.7 MiB | 21.9 s | 0.997 | 145 µs |
-| `Int8` | 12.5 MiB | 19.9 s | 0.986 | 149 µs |
-| `Binary` | 7.0 MiB | 11.5 s | 0.283 | 73 µs |
-| `Binary` + re-rank | 7.0 MiB | — | 0.845 | 189 µs |
+| `None` | 27.8 MiB | 21.9 s | 0.997 | 145 µs |
+| `Int8` | 9.7 MiB | 19.9 s | 0.986 | 149 µs |
+| `Binary` | 4.2 MiB | 11.5 s | 0.283 | 73 µs |
+| `Binary` + re-rank | 4.2 MiB | — | 0.845 | 189 µs |
 
 `Int8` is close to free: 2.5× smaller for one point of recall. `Binary` is 4.4× smaller and the
 fastest to build and query, but on its own it is genuinely coarse — pair it with a full-precision
@@ -433,6 +466,30 @@ the crossover is real rather than an artefact of comparing against a stale snaps
 
 The gap narrows as the batch grows, which is the signal to fold: once a batch is worth a sizeable
 fraction of the index, a delta stops being a bargain and a fresh snapshot is the better save.
+
+### Graph versus clusters
+
+20 000 vectors, `k = 10`. `spread` is how far the corpus drifts from the centroids it was generated
+from: low is cleanly clustered, high is nearly structureless. It is the column to read first, because
+a synthetic corpus built *from* centroids is the best case a clustered index can meet, and saying so
+is the difference between a measurement and an advertisement.
+
+| spread | index | recall@10 | mean query | pages/query |
+| --- | --- | --- | --- | --- |
+| 0.5 | HNSW | 1.000 | 152 µs | 116 |
+| 0.5 | clusters, nprobe=1 | 1.000 | 19 µs | 10 |
+| 0.5 | clusters, nprobe=8 | 1.000 | 37 µs | 72 |
+| 1.0 | HNSW | 1.000 | 74 µs | 140 |
+| 1.0 | clusters, nprobe=1 | 1.000 | 14 µs | 10 |
+| 1.0 | clusters, nprobe=8 | 1.000 | 37 µs | 71 |
+| 2.0 | HNSW | 0.880 | 95 µs | 184 |
+| 2.0 | clusters, nprobe=1 | 0.402 | 13 µs | 9 |
+| 2.0 | clusters, nprobe=8 | 0.668 | 36 µs | 75 |
+
+"Pages" counts the distinct 4 KiB pages of the vector region a query touches — what a file-backed
+index pays for, and the one advantage clustering has that no amount of tuning gives a graph. The
+recall column is the price: where the corpus stops partitioning cleanly, the clustered index gives up
+what the graph keeps.
 
 ### Parallel search
 
@@ -587,6 +644,10 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
     its deltas, with the chain checked so a stray delta cannot be applied.
 18. **Parallel search** ✅ `searcher()` gives a reader its own traversal state, so searches run on every
     core; `kromus-sync`'s wrappers pair that with a writer-preferring lock.
+19. **Sectioned format** ✅ every index is a container of named, checksummed sections — denser, locatable
+    corruption, and readable in parts.
+20. **Clustered index** ✅ `ClusteredIndex` groups the corpus instead of linking it, trading recall for
+    the contiguity a file-backed index needs.
 
 Next: multi-value and numeric metadata filters, an incremental "add to a persisted index without a
 full re-encode" path, and SIMD-friendly distance kernels where a platform offers them without

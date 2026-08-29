@@ -41,6 +41,7 @@ internal const val KIND_HYBRID: Int = 3
 internal const val KIND_VECTOR_DELTA: Int = 4
 internal const val KIND_TEXT_DELTA: Int = 5
 internal const val KIND_HYBRID_DELTA: Int = 6
+internal const val KIND_CLUSTERED: Int = 7
 
 internal fun kindName(kind: Int): String =
     when (kind) {
@@ -50,6 +51,7 @@ internal fun kindName(kind: Int): String =
         KIND_VECTOR_DELTA -> "vector delta"
         KIND_TEXT_DELTA -> "text delta"
         KIND_HYBRID_DELTA -> "hybrid delta"
+        KIND_CLUSTERED -> "clustered"
         else -> "unknown($kind)"
     }
 
@@ -84,7 +86,7 @@ internal class ContainerWriter(
 
         // Offsets are absolute, so a reader can jump straight to a section without walking the ones
         // before it — the whole point of having a table.
-        var offset = w.size + tags.size * TABLE_ENTRY
+        var offset = w.bytesWritten + tags.size * TABLE_ENTRY
         for (i in tags.indices) {
             for (c in tags[i]) w.byte(c.code)
             w.int(offset)
