@@ -4,6 +4,7 @@ import io.github.kromus.HnswConfig
 import io.github.kromus.KeyCodec
 import io.github.kromus.Quantization
 import io.github.kromus.VectorIndex
+import io.github.kromus.encodeDelta
 import io.github.kromus.encodeToByteArray
 import io.github.kromus.rerank
 
@@ -199,6 +200,52 @@ fun hardnessSweep(count: Int, dimensions: Int, queries: Int, k: Int, ef: Int): R
             "%.3f".format(recallAt(truth, results, k)),
             "%.0f µs".format(latencies.mean()),
             "%.0f µs".format(bruteForce.mean()),
+        )
+    }
+    return report
+}
+
+/**
+ * What a save costs after a batch of edits — the number that decides whether an index can be kept
+ * durable on device at all, since a full encode is paid in write amplification, not just latency.
+ */
+fun incrementalPersistence(dataset: Dataset, batchSizes: List<Int>): Report {
+    val report = Report("Incremental persistence")
+    report.note(
+        "A full encode rewrites every vector, every adjacency list and every entry, however little " +
+            "changed. A delta carries the nodes an insert actually touched — the new one plus the " +
+            "existing ones it relinked — and never a vector, since a stored vector is immutable. " +
+            "Both columns are measured against the same index state, which keeps growing down the " +
+            "table, so the crossover below is real: past a batch worth a sizeable fraction of the " +
+            "index, fold the chain back into a snapshot instead.",
+    )
+    report.columns("edits", "index", "full encode", "delta", "smaller by", "full ms", "delta ms")
+
+    val index = VectorIndex<Int>(dataset.dimensions)
+    for (i in dataset.vectors.indices) index.add(i, dataset.vectors[i])
+    index.encodeToByteArray(KeyCodec.int)
+
+    var next = dataset.vectors.size
+    for (edits in batchSizes) {
+        repeat(edits) { i -> index.add(next++, dataset.vectors[i % dataset.vectors.size]) }
+
+        var delta: ByteArray? = null
+        val deltaMs = Timing.millis { delta = index.encodeDelta(KeyCodec.int) }
+        val deltaBytes = delta ?: continue
+
+        // Straight after, on the very same content, so the two columns are comparable. This also
+        // re-checkpoints, which is what the next batch measures from.
+        val full = index.encodeToByteArray(KeyCodec.int)
+        val fullMs = Timing.millis { index.encodeToByteArray(KeyCodec.int) }
+
+        report.row(
+            edits,
+            index.size,
+            formatBytes(full.size.toLong()),
+            formatBytes(deltaBytes.size.toLong()),
+            "%.0f×".format(full.size.toDouble() / deltaBytes.size),
+            "%.0f".format(fullMs),
+            "%.1f".format(deltaMs),
         )
     }
     return report
