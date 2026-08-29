@@ -57,6 +57,7 @@ apiValidation {
             "quantization",
             "sync",
             "onnx",
+            "prebuilt",
             "benchmarks",
         ),
     )

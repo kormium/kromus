@@ -240,6 +240,57 @@ across a reload, since records and the string-keyed maps inside them are written
 rather than in whatever order a map happens to iterate. So an index can be content-hashed, cached by
 digest, or compared in a test.
 
+#### Where an index gets built
+
+There is one way to build an index — `add`, in common code — and it runs wherever you run it. Because
+construction and encoding are deterministic and identical on every target, the same code produces the
+same bytes on a phone, on a server, or in a Gradle task. What differs is not the building but the
+deployment, and there are two shapes:
+
+**Built where it is used.** The index lives, changes and is searched in the same process.
+[`kromus-sync`](kromus-sync/) keeps it in step with your data and `.concurrent()` guards it against a
+writer and readers sharing it. This is the shape for content the user creates.
+
+**Built elsewhere, read here.** Build on a server or in CI, ship the bytes, and the device only loads
+and searches. The two costs a device is worst at — running an embedding model over the whole corpus,
+and constructing the graph — are paid once on a machine that does not mind. Nothing writes to the
+index on device, so there is no lock to take: hand each thread a [`searcher()`](#searching-on-several-threads).
+This is the shape for content you ship. [`samples/prebuilt`](samples/prebuilt/) builds its index in a
+Gradle task and loads it from resources.
+
+"On a server" and "at compile time" are the same shape with a different build machine — same bytes,
+same guarantees, same loading code. And the two shapes compose: a prebuilt index over your content
+plus a small local one over the user's, searched together and fused, which is what most apps actually
+want.
+
+Two things do not move to the server. **Queries are still embedded on the device**, with the model the
+corpus was embedded with — which is what the next section is about. And the whole blob is still
+inflated into memory on load, which is the ceiling on how large a shipped index can usefully be
+([#27](https://github.com/kormium/kromus/issues/27)).
+
+#### Recording what built an index
+
+An index means nothing on its own. Its vectors are only comparable to queries embedded by the *same*
+model, and its terms only match queries tokenized by the *same* analyzer — and neither travels in the
+bytes. Pair a blob with the wrong one and nothing throws; the results are simply wrong.
+
+That is easy to avoid while you build and search in one process, and easy to get wrong the moment an
+index is built somewhere else — on a server, in CI, by a colleague. So a blob can carry what produced
+it, and loading can insist:
+
+```kotlin
+// wherever the index is built
+val blob = index.encodeToByteArray(KeyCodec.string, provenance = "all-MiniLM-L6-v2/mean/l2")
+
+// wherever it is loaded — throws KromusFormatException if the two disagree
+val index = decodeHybridIndex(blob, KeyCodec.string, expect = "all-MiniLM-L6-v2/mean/l2")
+
+provenanceOf(blob)   // read it without decoding, e.g. to decide whether to fetch a newer asset
+```
+
+The string is opaque to kromus — put in whatever identifies the pairing: model name and revision,
+analyzer configuration, corpus date. The guard is opt-in: pass no `expect` and nothing is checked.
+
 #### Saving only what changed
 
 A full encode rewrites everything, however little moved. That is right for "build once, ship it" and

@@ -1,0 +1,14 @@
+Structured concurrency ties a coroutine's lifetime to its scope, so no background thread outlives the work that started it.
+A suspend function can await without holding a thread, which is why thousands of coroutines fit where thousands of threads would not.
+Kotlin flows are cold: no code runs until something collects, and each collector gets its own execution.
+Debugging a concurrency bug means reproducing an interleaving, which is why deterministic tests matter more here than anywhere.
+Sourdough starter doubles in four to six hours at room temperature when the yeast is healthy and recently fed.
+Over-proofed dough spreads instead of rising, because the gluten can no longer hold the gas the yeast made.
+Knead bread dough until it passes the windowpane test, then let it rest before it goes in the oven.
+A hot oven and enough steam give a loaf its crust; a cool one gives it a pale, soft shell.
+Learning guitar chords is mostly a matter of the left hand, and rhythm is mostly the right.
+A jazz band leaves room in the melody so each instrument can answer the one before it.
+Piano practice rewards short daily sessions far more than one long session a week.
+Camping above the treeline means wind, so pitch the tent behind rock rather than in the open.
+A long hike is paced by the climbs, not the distance, and the trail out is rarely the trail back.
+Pack a river crossing for wet feet: dry socks in the backpack matter more than waterproof boots.

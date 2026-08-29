@@ -35,6 +35,9 @@ include(
     "samples:quantization",
     "samples:sync",
     "samples:onnx",
+    // Builds its index at build time and ships it as a resource — the "assemble on a server, read on
+    // a device" shape, which is where the format's determinism stops being a nicety.
+    "samples:prebuilt",
 )
 
 // benchmarks — recall against exact search, latency, quantization trade-offs, the cost of churn.

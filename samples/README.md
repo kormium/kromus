@@ -11,9 +11,10 @@ real semantics, swap in [`kromus-onnx`](../kromus-onnx/).
 | **hybrid** | `./gradlew :samples:hybrid:run` | vector search answers a question; keyword search finds an exact code (`E-4021`) that embeddings can't; hybrid returns **both** |
 | **quantization** | `./gradlew :samples:quantization:run` | shrink vectors ~**32×** (1 bit each), then a two-step *rough search → exact re-rank* keeps results accurate |
 | **sync** | `./gradlew :samples:sync:run` | a notes app: as notes are added/edited/deleted the search index **stays in step** ([`kromus-sync`](../kromus-sync/)) |
+| **prebuilt** | `./gradlew :samples:prebuilt:run` | the index is built **at build time** by a Gradle task and shipped in the resources — the app only loads and searches, with no graph construction, no corpus embedding and no writer |
 | **onnx** | `./gradlew :samples:onnx:run` | the **real deal**: `all-MiniLM-L6-v2` via [`kromus-onnx`](../kromus-onnx/) — real semantic search where queries match by meaning (needs network on first run; auto-downloads a ~23 MB model to a local cache) |
 
-The first four use `ToyEmbedder` — it maps each word to a topic (programming / cooking / music /
+All but **onnx** use `ToyEmbedder` — it maps each word to a topic (programming / cooking / music /
 outdoors), so you can predict every match by reading its lexicon; that's the whole point: you can
 *see* why semantic search works. The **onnx** sample then shows the same thing with a genuine model:
 
@@ -23,4 +24,3 @@ Search: "how do I write asynchronous code"
 Search: "the history of jazz musicians"
    → 83%  The origins and evolution of jazz music
 ```
-
