@@ -7,19 +7,31 @@ package io.github.kromus
 // every read is bounds-checked, so stale or corrupt bytes surface as a KromusFormatException the
 // caller can catch and rebuild from — not as a crash.
 //
-// The bytes are stable across platforms twice over: floats are stored by raw bits, and records are
+// The bytes are stable across platforms three times over: floats are stored by raw bits; records are
 // written in a fixed order (vector entries by internal id, documents by insertion order) rather than
-// in hash-map iteration order, so encoding the same index content anywhere yields the same bytes.
-// That makes an index safe to content-hash, cache by digest and compare in tests.
+// in hash-map iteration order; and within a record the string-keyed maps — attributes and term
+// frequencies — are written sorted by key. That last one is what makes the guarantee survive a
+// reload: `add` builds those maps one way and a decoder another, and a caller can hand in any Map
+// implementation at all, so anything that leaned on iteration order would produce different bytes for
+// identical content. Sorting makes the layout a function of the content alone, which is what "safe to
+// content-hash" has to mean.
 //
 // Analyzers are functions and cannot be serialized, so text/hybrid loaders take the analyzer the
 // index was built with — supply the same one for consistent query tokenization.
 
-private const val VECTOR_FORMAT: Int = 4
-private const val TEXT_FORMAT: Int = 3
-private const val HYBRID_FORMAT: Int = 2
+private const val VECTOR_FORMAT: Int = 5
+private const val TEXT_FORMAT: Int = 4
 
-/** Serializes this vector index (graph + key mapping) to a byte array. */
+// internal, not private: the delta decoder reads a hybrid snapshot's header to split its halves.
+internal const val HYBRID_FORMAT: Int = 3
+
+/**
+ * Serializes this vector index (graph + key mapping) to a byte array.
+ *
+ * This also checkpoints the index: [VectorIndex.dirtyNodes] drops to zero and later [encodeDelta]
+ * calls chain onto *these* bytes, so keep what you get back — a delta written against a snapshot you
+ * discarded has nothing to be applied to.
+ */
 public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
     val g = graph()
     val store = g.store()
@@ -71,7 +83,7 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
         entries.int(id)
         val attrs = attributesAt(id)
         entries.int(attrs.size)
-        for ((ak, av) in attrs) {
+        for ((ak, av) in attrs.canonical()) {
             entries.int(pool.idOf(ak))
             entries.int(pool.idOf(av))
         }
@@ -79,7 +91,9 @@ public fun <K> VectorIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArra
     pool.writeTo(w)
     w.int(liveCount)
     w.raw(entries.toByteArray())
-    return w.toByteArray()
+    val bytes = w.toByteArray()
+    checkpoint(revisionOf(bytes))
+    return bytes
 }
 
 /**
@@ -160,8 +174,19 @@ public fun <K> decodeVectorIndex(bytes: ByteArray, keyCodec: KeyCodec<K>): Vecto
     }
 
     val hnsw = Hnsw.restore(metric, config, store, levels, neighbors, deleted, entryPoint, topLayer)
-    return VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n)
+    val index = VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n)
+    // A freshly decoded index is a checkpoint of exactly these bytes, so deltas can chain onto it.
+    index.checkpoint(revisionOf(bytes))
+    return index
 }
+
+/**
+ * A string-keyed map's entries in key order — the canonical layout every encoder writes.
+ *
+ * String comparison is by UTF-16 code unit, which is the same relation on every target, so this
+ * orders identically everywhere.
+ */
+internal fun <V> Map<String, V>.canonical(): List<Map.Entry<String, V>> = entries.sortedBy { it.key }
 
 /** Lower bound on the bytes one persisted node occupies, used to reject absurd node counts. */
 private fun bytesPerNode(dimensions: Int, quantization: Quantization): Int {
@@ -174,7 +199,12 @@ private fun bytesPerNode(dimensions: Int, quantization: Quantization): Int {
     return vector + 4 + 1 + 4
 }
 
-/** Serializes this full-text index to a byte array. The analyzer is not stored (see [decodeTextIndex]). */
+/**
+ * Serializes this full-text index to a byte array. The analyzer is not stored (see [decodeTextIndex]).
+ *
+ * Like the vector encoder this checkpoints the index, so later [encodeDelta] calls chain onto these
+ * bytes — keep what you get back.
+ */
 public fun <K> TextIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray {
     val w = ByteWriter()
     w.header(KIND_TEXT, TEXT_FORMAT)
@@ -190,12 +220,12 @@ public fun <K> TextIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray 
         entries.bytes(keyCodec.encode(doc.key))
         entries.int(doc.length)
         entries.int(doc.termFreqs.size)
-        for ((term, freq) in doc.termFreqs) {
+        for ((term, freq) in doc.termFreqs.canonical()) {
             entries.int(pool.idOf(term))
             entries.int(freq)
         }
         entries.int(doc.attributes.size)
-        for ((ak, av) in doc.attributes) {
+        for ((ak, av) in doc.attributes.canonical()) {
             entries.int(pool.idOf(ak))
             entries.int(pool.idOf(av))
         }
@@ -203,7 +233,9 @@ public fun <K> TextIndex<K>.encodeToByteArray(keyCodec: KeyCodec<K>): ByteArray 
     pool.writeTo(w)
     w.int(docs.size)
     w.raw(entries.toByteArray())
-    return w.toByteArray()
+    val bytes = w.toByteArray()
+    checkpoint(revisionOf(bytes))
+    return bytes
 }
 
 /**
@@ -242,6 +274,7 @@ public fun <K> decodeTextIndex(
         }
         index.loadDoc(key, termFreqs, length, attributes)
     }
+    index.checkpoint(revisionOf(bytes))
     return index
 }
 

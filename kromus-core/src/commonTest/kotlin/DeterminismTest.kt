@@ -1,6 +1,7 @@
 package io.github.kromus
 
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 class DeterminismTest {
@@ -53,5 +54,49 @@ class DeterminismTest {
 
         assertEquals(all.take(10), top10, "bounded selection must agree with ranking the whole corpus")
         assertEquals(all.map { it.score }.sortedDescending(), all.map { it.score })
+    }
+
+    @Test
+    fun reEncodingAReloadedIndexReproducesTheBytes() {
+        // Byte-stability has to hold across a reload, not just between two encodes of the same live
+        // object — comparing a rebuilt index against a cached one by digest is the whole point of the
+        // guarantee. It is easy to lose: `add` and the decoder build the term/attribute maps
+        // differently, so anything that leaned on their iteration order would encode identical content
+        // into different bytes.
+        val index = TextIndex<Int>()
+        listOf(
+            "kotlin coroutines structured concurrency",
+            "hierarchical navigable small world graphs",
+            "bm25 ranking and inverted indexes",
+        ).forEachIndexed { i, t -> index.add(i, t, mapOf("lang" to "kotlin", "kind" to "doc$i")) }
+
+        val first = index.encodeToByteArray(KeyCodec.int)
+        val second = decodeTextIndex(first, KeyCodec.int).encodeToByteArray(KeyCodec.int)
+        assertContentEquals(first, second, "text index")
+    }
+
+    @Test
+    fun attributeMapImplementationDoesNotChangeTheBytes() {
+        // Attributes come straight from the caller, so the encoding must not depend on which Map they
+        // arrived in — two indexes holding equal content have to hash equal.
+        val dim = 8
+        val vector = FloatArray(dim) { it * 0.125f }
+        val pairs = listOf("z" to "1", "a" to "2", "m" to "3")
+
+        val viaHash = VectorIndex<Int>(dim, Metric.Cosine)
+        viaHash.add(0, vector, HashMap(pairs.toMap()))
+
+        val viaLinked = VectorIndex<Int>(dim, Metric.Cosine)
+        viaLinked.add(
+            0, vector,
+            LinkedHashMap<String, String>().apply {
+                pairs.reversed().forEach { put(it.first, it.second) }
+            },
+        )
+
+        assertContentEquals(
+            viaHash.encodeToByteArray(KeyCodec.int),
+            viaLinked.encodeToByteArray(KeyCodec.int),
+        )
     }
 }
