@@ -48,8 +48,43 @@ public class VectorIndex<K> private constructor(
     private val keyOf = ArrayList<K?>()
     private val attrsOf = ArrayList<Map<String, String>>()
 
+    // --- incremental persistence state (see Persistence.kt) ---
+
+    // Identity of the last blob this index encoded, so a delta can name the snapshot it applies to
+    // and a decoder can refuse one built from a different history. 0 means "never encoded".
+    internal var revision: Long = 0
+
+    // Capacity at that checkpoint: the id boundary a delta splits on. Ids below it existed already
+    // and owe only their mutable state; ids at or above it are new and carry their vector.
+    internal var baseCapacity: Int = 0
+
+    // Set by compact()/clear(), which renumber or drop ids and so invalidate any id-based delta.
+    private var rebuilt = false
+
+    // Ids whose key or attributes changed since the last checkpoint — tracked apart from the graph's
+    // own dirty set because the two move at very different rates: one add relinks tens of existing
+    // nodes but changes at most two entries, and an entry record carries a key and its attributes.
+    private val dirtyEntryIds = HashSet<Int>()
+
     /** Number of live (non-removed) entries. */
     public val size: Int get() = idOf.size
+
+    /**
+     * How many internal slots have changed since the last [encodeToByteArray] or [encodeDelta] — a
+     * cheap signal for deciding *when* a save is worth making.
+     *
+     * Counts slots, not entries: one [add] dirties the new node plus every existing node the insert
+     * relinked, so this runs ahead of the number of edits you made. That is the quantity that
+     * actually predicts delta size.
+     */
+    public val dirtyNodes: Int get() = hnsw.dirtyCount
+
+    /**
+     * True when the next save has to be a full [encodeToByteArray] because no delta could express
+     * what happened: [compact] and [clear] renumber or drop internal ids, and deltas are written in
+     * terms of them.
+     */
+    public val needsFullSnapshot: Boolean get() = rebuilt || revision == 0L
 
     /**
      * Slots held by removed or replaced entries — memory and traversal cost the index still pays.
@@ -76,6 +111,7 @@ public class VectorIndex<K> private constructor(
         idOf.remove(key)?.let { old ->
             hnsw.markDeleted(old)
             keyOf[old] = null
+            dirtyEntryIds.add(old)
         }
         val id = hnsw.add(vector)
         // Every hnsw.add() appends exactly one id equal to the current capacity - 1, kept in lockstep
@@ -84,6 +120,7 @@ public class VectorIndex<K> private constructor(
         keyOf.add(key)
         attrsOf.add(attributes)
         idOf[key] = id
+        dirtyEntryIds.add(id)
     }
 
     /**
@@ -97,6 +134,7 @@ public class VectorIndex<K> private constructor(
         val id = idOf.remove(key) ?: return false
         hnsw.markDeleted(id)
         keyOf[id] = null
+        dirtyEntryIds.add(id)
         return true
     }
 
@@ -145,6 +183,7 @@ public class VectorIndex<K> private constructor(
     public fun updateAttributes(key: K, attributes: Map<String, String>): Boolean {
         val id = idOf[key] ?: return false
         attrsOf[id] = attributes
+        dirtyEntryIds.add(id)
         return true
     }
 
@@ -208,6 +247,9 @@ public class VectorIndex<K> private constructor(
         keyOf.addAll(newKeyOf)
         attrsOf.clear()
         attrsOf.addAll(newAttrs)
+        // Every surviving entry has a new id, so no delta expressed over ids can describe this.
+        rebuilt = true
+        dirtyEntryIds.clear()
         return reclaimed
     }
 
@@ -217,11 +259,37 @@ public class VectorIndex<K> private constructor(
         idOf.clear()
         keyOf.clear()
         attrsOf.clear()
+        rebuilt = true
+        dirtyEntryIds.clear()
     }
 
     // --- persistence support (accessed by the encode/decode functions in Persistence.kt) ---
 
     internal fun graph(): Hnsw = hnsw
+
+    /** Ids whose key or attributes changed since the last checkpoint, ascending. */
+    internal fun dirtyEntriesAscending(): IntArray = dirtyEntryIds.toIntArray().also { it.sort() }
+
+    /** Marks the current state as checkpointed and records the identity of the blob just written. */
+    internal fun checkpoint(revision: Long) {
+        this.revision = revision
+        this.baseCapacity = hnsw.capacity
+        this.rebuilt = false
+        dirtyEntryIds.clear()
+        hnsw.clearDirty()
+    }
+
+    /** Replays one entry-slot change from a delta: [key] null empties the slot. */
+    internal fun applyEntry(id: Int, key: K?, attributes: Map<String, String>) {
+        while (keyOf.size <= id) {
+            keyOf.add(null)
+            attrsOf.add(emptyMap())
+        }
+        keyOf[id]?.let { previous -> if (idOf[previous] == id) idOf.remove(previous) }
+        keyOf[id] = key
+        attrsOf[id] = attributes
+        if (key != null) idOf[key] = id
+    }
 
     /** Live key -> internal id, in iteration order. */
     internal fun liveEntries(): Map<K, Int> = idOf

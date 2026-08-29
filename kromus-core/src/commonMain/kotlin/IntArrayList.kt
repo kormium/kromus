@@ -28,5 +28,9 @@ internal class IntArrayList(
         size = count
     }
 
+    fun clear() {
+        size = 0
+    }
+
     fun toIntArray(): IntArray = data.copyOf(size)
 }

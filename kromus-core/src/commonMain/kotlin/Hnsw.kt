@@ -39,6 +39,14 @@ internal class Hnsw private constructor(
     private var entryPoint = -1
     private var topLayer = 0
 
+    // Ids whose persisted state changed since the last checkpoint, for incremental persistence.
+    // A flag array gives O(1) marking without boxing; the companion list gives O(dirty) iteration,
+    // which is the whole point — scanning the flags would be O(capacity) and defeat the purpose on
+    // the large indexes deltas exist for. A vector is never rewritten, so a dirty *existing* node
+    // only owes its deleted flag and adjacency.
+    private var dirtyFlags = BooleanArray(0)
+    private val dirtyIds = IntArrayList()
+
     private val rng = Random(config.seed)
     private val levelMultiplier = 1.0 / ln(config.m.toDouble())
 
@@ -70,6 +78,7 @@ internal class Hnsw private constructor(
         if (deletedFlags[id]) return
         deletedFlags[id] = true
         deletedCount++
+        markDirty(id)
     }
 
     /** Inserts [rawVector] and returns its internal id. */
@@ -89,6 +98,7 @@ internal class Hnsw private constructor(
         deletedFlags[id] = false
         neighbors.add(Array(level + 1) { IntArrayList() })
         nodeCount = id + 1
+        markDirty(id)
 
         if (entryPoint == -1) {
             entryPoint = id
@@ -119,6 +129,10 @@ internal class Hnsw private constructor(
             val own = neighbors[id][lc]
             for (e in selected) {
                 own.add(e)
+                // Linking is symmetric, so the neighbour's own adjacency changes too — and it may be
+                // pruned right after. Both make it dirty; this is the reason a delta cannot be a plain
+                // append of new nodes.
+                markDirty(e)
                 val other = neighbors[e][lc]
                 other.add(id)
                 if (other.size > mMax) {
@@ -337,6 +351,15 @@ internal class Hnsw private constructor(
         val n = maxOf(needed, if (levels.size == 0) 16 else levels.size * 2)
         levels = levels.copyOf(n)
         deletedFlags = deletedFlags.copyOf(n)
+        dirtyFlags = dirtyFlags.copyOf(n)
+    }
+
+    /** Records that [id]'s persisted state changed. Called for graph edits and, from
+     * [VectorIndex.updateAttributes], for a metadata edit that touches no graph state at all. */
+    fun markDirty(id: Int) {
+        if (dirtyFlags[id]) return
+        dirtyFlags[id] = true
+        dirtyIds.add(id)
     }
 
     private fun ensureLayerCapacity(needed: Int) {
@@ -390,6 +413,56 @@ internal class Hnsw private constructor(
     fun neighborsAtLayer(id: Int, layer: Int): IntArrayList = neighbors[id][layer]
 
     fun store(): VectorStore = store
+
+    // --- incremental persistence (see Persistence.kt) ---
+
+    /** How many ids have changed since [clearDirty]. */
+    val dirtyCount: Int get() = dirtyIds.size
+
+    /**
+     * The dirty ids, ascending. Sorted rather than in mark order so a delta's bytes depend only on
+     * *what* changed, not on the order the inserts happened to touch things — the same property the
+     * full snapshot gets from walking ids in order.
+     */
+    fun dirtyIdsAscending(): IntArray = dirtyIds.toIntArray().also { it.sort() }
+
+    /** Marks the current state as checkpointed: everything written, nothing outstanding. */
+    fun clearDirty() {
+        for (i in 0 until dirtyIds.size) dirtyFlags[dirtyIds[i]] = false
+        dirtyIds.clear()
+    }
+
+    /** Appends a node whose vector is already in stored form, bypassing graph construction. */
+    fun appendRestoredNode(level: Int, deleted: Boolean, links: Array<IntArray>) {
+        val id = store.size - 1
+        ensureNodeCapacity(id + 1)
+        levels[id] = level
+        deletedFlags[id] = deleted
+        if (deleted) deletedCount++
+        neighbors.add(
+            Array(links.size) { layer ->
+                IntArrayList(maxOf(links[layer].size, 1)).also { it.setAll(links[layer], links[layer].size) }
+            },
+        )
+        nodeCount = id + 1
+    }
+
+    /** Overwrites the mutable state of an existing node. Its vector and level are immutable. */
+    fun replaceNodeState(id: Int, deleted: Boolean, links: Array<IntArray>) {
+        if (deleted != deletedFlags[id]) {
+            deletedFlags[id] = deleted
+            deletedCount += if (deleted) 1 else -1
+        }
+        val existing = neighbors[id]
+        for (layer in links.indices) {
+            existing[layer].setAll(links[layer], links[layer].size)
+        }
+    }
+
+    fun setEntry(entryPoint: Int, topLayer: Int) {
+        this.entryPoint = entryPoint
+        this.topLayer = topLayer
+    }
 
     /** Ids ascending by distance with their similarity scores — the allocation-light result of [query]. */
     internal class Hits(

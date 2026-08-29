@@ -146,11 +146,20 @@ internal const val KIND_VECTOR: Int = 1
 internal const val KIND_TEXT: Int = 2
 internal const val KIND_HYBRID: Int = 3
 
+// Deltas carry their own kinds, so feeding a snapshot where a delta belongs (or the reverse) is
+// reported as the mix-up it is rather than as a version mismatch.
+internal const val KIND_VECTOR_DELTA: Int = 4
+internal const val KIND_TEXT_DELTA: Int = 5
+internal const val KIND_HYBRID_DELTA: Int = 6
+
 private fun kindName(kind: Int): String =
     when (kind) {
         KIND_VECTOR -> "vector"
         KIND_TEXT -> "text"
         KIND_HYBRID -> "hybrid"
+        KIND_VECTOR_DELTA -> "vector delta"
+        KIND_TEXT_DELTA -> "text delta"
+        KIND_HYBRID_DELTA -> "hybrid delta"
         else -> "unknown($kind)"
     }
 

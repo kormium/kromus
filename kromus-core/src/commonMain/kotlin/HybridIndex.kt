@@ -62,6 +62,21 @@ public class HybridIndex<K> private constructor(
     /** Slots held by removed or replaced vectors; see [VectorIndex.tombstones] and [compact]. */
     public val tombstones: Int get() = vectorIndex.tombstones
 
+    /**
+     * How many internal slots and documents have changed since the last `encodeToByteArray` or
+     * `encodeDelta`, across both modalities — a cheap signal for deciding *when* a save is worth
+     * making.
+     */
+    public val dirtyNodes: Int get() = vectorIndex.dirtyNodes + textIndex.dirtyDocuments
+
+    /**
+     * True when the next save has to be a full `encodeToByteArray` because no delta could describe
+     * what happened — see [VectorIndex.needsFullSnapshot]. True if either half says so: the two are
+     * written and replayed as a pair.
+     */
+    public val needsFullSnapshot: Boolean
+        get() = vectorIndex.needsFullSnapshot || textIndex.needsFullSnapshot
+
     /** The live keys. Read-only; do not retain across edits. */
     public val keys: Set<K> get() = liveKeys
 
