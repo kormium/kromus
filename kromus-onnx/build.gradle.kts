@@ -58,7 +58,23 @@ kotlin {
                 defFile(project.file("src/nativeInterop/cinterop/onnxruntime.def"))
                 includeDirs("$onnxRoot/include")
             }
+            // The interop test drives the generated bindings for real, so its executable has to link
+            // the library the headers describe. Only the test links it: kromus itself binds nothing,
+            // which is what keeps the default build free of any ORT dependency.
+            binaries.withType(org.jetbrains.kotlin.gradle.plugin.mpp.TestExecutable::class.java)
+                .configureEach {
+                    linkerOpts("-L$onnxRoot/lib", "-lonnxruntime")
+                }
         }
+        // Registered only under the flag, so a default build never sees a source file that needs
+        // headers it does not have.
+        sourceSets.getByName("nativeTest").kotlin.srcDir("src/nativeOrtTest/kotlin")
+
+        // The linked library is resolved at run time too, not just at link time.
+        project.tasks.withType(org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest::class.java)
+            .configureEach {
+                environment("LD_LIBRARY_PATH", "$onnxRoot/lib")
+            }
     }
 
     sourceSets {
