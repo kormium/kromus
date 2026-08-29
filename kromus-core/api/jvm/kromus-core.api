@@ -60,9 +60,11 @@ public final class io/github/kromus/HybridIndex {
 	public final fun getAnalyzer ()Lio/github/kromus/Analyzer;
 	public final fun getBm25Config ()Lio/github/kromus/Bm25Config;
 	public final fun getDimensions ()I
+	public final fun getDirtyNodes ()I
 	public final fun getHnswConfig ()Lio/github/kromus/HnswConfig;
 	public final fun getKeys ()Ljava/util/Set;
 	public final fun getMetric ()Lio/github/kromus/Metric;
+	public final fun getNeedsFullSnapshot ()Z
 	public final fun getRrfK ()I
 	public final fun getSize ()I
 	public final fun getTombstones ()I
@@ -74,6 +76,17 @@ public final class io/github/kromus/HybridIndex {
 	public final fun searchVector ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun searchVector$default (Lio/github/kromus/HybridIndex;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public final fun updateAttributes (Ljava/lang/Object;Ljava/util/Map;)Z
+}
+
+public final class io/github/kromus/IncrementalPersistenceKt {
+	public static final fun decodeHybridIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;)Lio/github/kromus/HybridIndex;
+	public static synthetic fun decodeHybridIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;ILjava/lang/Object;)Lio/github/kromus/HybridIndex;
+	public static final fun decodeTextIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;)Lio/github/kromus/TextIndex;
+	public static synthetic fun decodeTextIndex$default ([BLjava/util/List;Lio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;ILjava/lang/Object;)Lio/github/kromus/TextIndex;
+	public static final fun decodeVectorIndex ([BLjava/util/List;Lio/github/kromus/KeyCodec;)Lio/github/kromus/VectorIndex;
+	public static final fun encodeDelta (Lio/github/kromus/HybridIndex;Lio/github/kromus/KeyCodec;)[B
+	public static final fun encodeDelta (Lio/github/kromus/TextIndex;Lio/github/kromus/KeyCodec;)[B
+	public static final fun encodeDelta (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;)[B
 }
 
 public abstract interface class io/github/kromus/KeyCodec {
@@ -169,7 +182,9 @@ public final class io/github/kromus/TextIndex {
 	public final fun contains (Ljava/lang/Object;)Z
 	public final fun getAnalyzer ()Lio/github/kromus/Analyzer;
 	public final fun getConfig ()Lio/github/kromus/Bm25Config;
+	public final fun getDirtyDocuments ()I
 	public final fun getKeys ()Ljava/util/Set;
+	public final fun getNeedsFullSnapshot ()Z
 	public final fun getSize ()I
 	public final fun remove (Ljava/lang/Object;)Z
 	public final fun search (Ljava/lang/String;ILkotlin/jvm/functions/Function1;)Ljava/util/List;
@@ -188,8 +203,10 @@ public final class io/github/kromus/VectorIndex {
 	public final fun contains (Ljava/lang/Object;)Z
 	public final fun getConfig ()Lio/github/kromus/HnswConfig;
 	public final fun getDimensions ()I
+	public final fun getDirtyNodes ()I
 	public final fun getKeys ()Ljava/util/Set;
 	public final fun getMetric ()Lio/github/kromus/Metric;
+	public final fun getNeedsFullSnapshot ()Z
 	public final fun getSize ()I
 	public final fun getTombstones ()I
 	public final fun remove (Ljava/lang/Object;)Z

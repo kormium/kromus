@@ -37,6 +37,18 @@ public class TextIndex<K>(
     // and reloading reproduces the same ordinals, which keeps ranking reproducible across platforms.
     private val docs = LinkedHashMap<K, Doc>()
 
+    // --- incremental persistence state (see IncrementalPersistence.kt) ---
+
+    /** What a delta owes for one key. */
+    internal enum class DocChange { Removed, Upserted, AttributesOnly }
+
+    // LinkedHashMap so a delta's records come out in edit order, which is deterministic for a given
+    // sequence of edits — the same reasoning that makes `docs` insertion-ordered.
+    private val dirtyDocs = LinkedHashMap<K, DocChange>()
+
+    internal var revision: Long = 0
+    private var rebuilt = false
+
     // term -> (key -> term frequency in that document)
     private val postings = HashMap<String, HashMap<K, Int>>()
     private var totalLength = 0L
@@ -44,6 +56,19 @@ public class TextIndex<K>(
 
     /** Number of indexed documents. */
     public val size: Int get() = docs.size
+
+    /**
+     * How many documents have changed since the last `encodeToByteArray` or `encodeDelta` — a cheap
+     * signal for deciding *when* a save is worth making.
+     */
+    public val dirtyDocuments: Int get() = dirtyDocs.size
+
+    /**
+     * True when the next save has to be a full `encodeToByteArray`: [clear] drops the document
+     * ordinals a delta is written against, and until something has been encoded there is no snapshot
+     * to chain from.
+     */
+    public val needsFullSnapshot: Boolean get() = rebuilt || revision == 0L
 
     /** The indexed keys, in insertion order. Read-only; do not retain across edits. */
     public val keys: Set<K> get() = docs.keys
@@ -65,6 +90,8 @@ public class TextIndex<K>(
         for ((term, f) in termFreqs) {
             postings.getOrPut(term) { HashMap() }[key] = f
         }
+        // add() removes first, which marked this key Removed; the upsert supersedes that.
+        dirtyDocs[key] = DocChange.Upserted
     }
 
     /**
@@ -75,6 +102,9 @@ public class TextIndex<K>(
     public fun updateAttributes(key: K, attributes: Map<String, String>): Boolean {
         val doc = docs[key] ?: return false
         doc.attributes = attributes
+        // Recorded apart from a content change so replay leaves the document's ordinal — and with it
+        // the tie-break between equally scored documents — exactly where it was.
+        if (dirtyDocs[key] != DocChange.Upserted) dirtyDocs[key] = DocChange.AttributesOnly
         return true
     }
 
@@ -84,6 +114,8 @@ public class TextIndex<K>(
         postings.clear()
         totalLength = 0L
         nextOrdinal = 0
+        dirtyDocs.clear()
+        rebuilt = true
     }
 
     /** Removes [key] and drops its postings entirely. @return true if [key] was present. */
@@ -95,6 +127,7 @@ public class TextIndex<K>(
             p.remove(key)
             if (p.isEmpty()) postings.remove(term)
         }
+        dirtyDocs[key] = DocChange.Removed
         return true
     }
 
@@ -151,11 +184,47 @@ public class TextIndex<K>(
 
     /** Reinserts a pre-tokenized document, rebuilding postings without re-running the analyzer. */
     internal fun loadDoc(key: K, termFreqs: Map<String, Int>, length: Int, attributes: Map<String, String>) {
-        docs[key] = Doc(nextOrdinal++, termFreqs, length, attributes)
+        loadDocAt(nextOrdinal, key, termFreqs, length, attributes)
+    }
+
+    // --- incremental persistence support (accessed by IncrementalPersistence.kt) ---
+
+    /**
+     * Reinserts a document under an explicit [ordinal] rather than the next one.
+     *
+     * A delta replays onto a decoded snapshot, whose ordinals were renumbered 0..n-1 on the way in.
+     * Carrying the live ordinal keeps a replayed document ordered against the base exactly as it is in
+     * the index the delta came from — and ordinals are the tie-break between equally scored documents,
+     * so getting this wrong would change ranking rather than fail loudly.
+     */
+    internal fun loadDocAt(
+        ordinal: Int,
+        key: K,
+        termFreqs: Map<String, Int>,
+        length: Int,
+        attributes: Map<String, String>,
+    ) {
+        docs[key] = Doc(ordinal, termFreqs, length, attributes)
+        if (ordinal >= nextOrdinal) nextOrdinal = ordinal + 1
         totalLength += length
         for ((term, f) in termFreqs) {
             postings.getOrPut(term) { HashMap() }[key] = f
         }
+    }
+
+    /** The pending changes, in edit order. */
+    internal fun dirtyChanges(): List<Pair<K, DocChange>> = dirtyDocs.map { (k, v) -> k to v }
+
+    /** Everything a delta needs about one live document, or null if it is gone. */
+    internal fun entryOf(key: K): TextEntry<K>? =
+        docs[key]?.let { TextEntry(key, it.termFreqs, it.length, it.attributes) }
+
+    internal fun ordinalOf(key: K): Int? = docs[key]?.ordinal
+
+    internal fun checkpoint(revision: Long) {
+        this.revision = revision
+        this.rebuilt = false
+        dirtyDocs.clear()
     }
 }
 
