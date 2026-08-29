@@ -23,6 +23,9 @@ plugins {
     // Formatting, applied to every module below. `./gradlew ktlintFormat` fixes, `ktlintCheck`
     // verifies (and runs as part of `check`). Rules are configured in .editorconfig.
     alias(libs.plugins.ktlint)
+    // API reference. Applied here because the root project is what aggregates the per-module output
+    // into one cross-linked site: `./gradlew dokkaGenerate` -> build/dokka/html.
+    alias(libs.plugins.dokka)
 }
 
 val ktlintVersion = libs.versions.ktlint
@@ -131,10 +134,32 @@ val moduleDescriptions = mapOf(
         ),
 )
 
+// The modules whose API reference is published. Mirrors publishableModules: if it ships to Central,
+// its KDoc should be browsable without adding the dependency first.
+dependencies {
+    publishableModules.forEach { dokka(project(":$it")) }
+}
+
+dokka {
+    moduleName.set("kromus")
+}
+
 subprojects {
     if (name !in publishableModules) return@subprojects
 
     apply(plugin = "com.vanniktech.maven.publish")
+    apply(plugin = "org.jetbrains.dokka")
+
+    // Every declared KDoc link resolves back to the source on GitHub at the tag being documented.
+    extensions.configure<org.jetbrains.dokka.gradle.DokkaExtension> {
+        dokkaSourceSets.configureEach {
+            sourceLink {
+                localDirectory.set(projectDir.resolve("src"))
+                remoteUrl("https://github.com/kormium/kromus/tree/v$version/${project.name}/src")
+                remoteLineSuffix.set("#L")
+            }
+        }
+    }
 
     configure<MavenPublishBaseExtension> {
         publishToMavenCentral()

@@ -19,6 +19,9 @@ It ships in layers:
 > metadata filters, pluggable analyzers, full-precision re-rank, graph compaction, an optional kemus
 > storage adapter and an optional `kromus-onnx` embedder are usable today; the API may still change
 > before 1.0. See the [changelog](CHANGELOG.md) for what has moved and the roadmap for what's next.
+>
+> **API reference:** [kormium.github.io/kromus](https://kormium.github.io/kromus/) — all four
+> modules, cross-linked, rebuilt from each release tag.
 
 ## Why it exists
 
@@ -194,6 +197,14 @@ reload instantly:
 index.saveTo(kemus, "my-index", KeyCodec.string)
 val reloaded = loadHybridIndex(kemus, "my-index", KeyCodec.string)
 ```
+
+## API reference
+
+Full KDoc for every published module is at **[kormium.github.io/kromus](https://kormium.github.io/kromus/)**,
+generated from the release tag and cross-linked across `kromus-core`, `kromus-kemus`, `kromus-onnx`
+and `kromus-sync`. Most of the reasoning that is not in this readme lives there: what `efSearch`
+trades, when `rerank` earns its second pass, why a `remove` leaves a routing hop behind, how a
+metadata filter is applied mid-traversal.
 
 ## Examples
 

@@ -1,0 +1,48 @@
+name: Docs
+
+on:
+  # The reference documents a release, so it is cut from the same tag the artifacts are.
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+# Only the newest tag's site is worth publishing; a run still in flight for an older one is not.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    # Ubuntu is enough here, unlike the release job: kromus declares no Apple-specific source sets,
+    # so the whole public API lives in common code and a Linux host documents all of it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Generate the API reference
+        # Aggregates every module in publishableModules into one cross-linked site; see the dokka
+        # block in build.gradle.kts.
+        run: ./gradlew dokkaGenerate --stacktrace
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/dokka/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
