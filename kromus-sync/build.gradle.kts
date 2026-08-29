@@ -63,5 +63,13 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test)
             }
         }
+        // The guarantees these wrappers exist for are only observable against real threads, which the
+        // web targets do not have — so the concurrency tests are JVM-only by necessity, not by
+        // convenience.
+        val jvmTest by getting {
+            dependencies {
+                implementation(libs.kotlinx.coroutines.test)
+            }
+        }
     }
 }

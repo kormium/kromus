@@ -30,6 +30,15 @@ import kotlinx.coroutines.sync.withLock
 // work first, then take the lock to write the result — which is what the `syncTo` overloads for these
 // wrappers already do.
 //
+// A plain Mutex, so searches serialize against each other and not only against writes. That looks
+// stronger than necessary — a search does not modify the index — but it is exactly necessary: Hnsw
+// reuses its per-search scratch (the visited-mark array and its epoch, the candidate heaps, the layer
+// result buffers) across calls, which is what makes a query allocate almost nothing and equally what
+// makes two concurrent queries corrupt each other. Run unguarded against real threads, most searches
+// throw and the rest quietly return the wrong neighbours; ConcurrentIndexParallelismTest pins that
+// down. Letting readers run in parallel means giving each search its own scratch first — a change to
+// the core's hot path, not a change of lock.
+//
 // Never let the index itself escape (`use { it }`): every access has to go through the lock to be
 // safe. Operations that legitimately hold it for a while — compaction, encoding a large index — block
 // readers for their duration, so keep them off the UI path.
