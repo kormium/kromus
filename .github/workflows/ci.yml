@@ -41,3 +41,30 @@ jobs:
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew build --stacktrace
+
+  # The ONNX Runtime C bindings are opt-in and bind nothing by default, so nothing else in this
+  # workflow touches them — which is how they stayed unverified. This job downloads a real ORT release
+  # and drives the generated bindings against it. Linux only: the .def is the same everywhere, and the
+  # part that can break (the struct of function pointers behind OrtGetApiBase) is exercised here for a
+  # fraction of a macOS runner's cost.
+  onnx-c-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Fetch the ONNX Runtime the version catalog pins
+        # Taken from libs.versions.toml rather than pinned here, so the C bindings are always checked
+        # against the same release the JVM backend depends on.
+        run: |
+          version="$(sed -n 's/^onnxruntime = "\(.*\)"/\1/p' gradle/libs.versions.toml)"
+          echo "Using ONNX Runtime $version"
+          curl -sSfL -o ort.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v$version/onnxruntime-linux-x64-$version.tgz"
+          tar xzf ort.tgz
+          echo "ORT_ROOT=$PWD/onnxruntime-linux-x64-$version" >> "$GITHUB_ENV"
+      - name: Build and run the interop test
+        run: ./gradlew :kromus-onnx:linuxX64Test -Pkromus.onnxCApi="$ORT_ROOT" --stacktrace

@@ -95,8 +95,18 @@ To bind ORT directly from Kotlin/Native, a ready cinterop `.def` is provided
 ./gradlew <task> -Pkromus.onnxCApi=/path/to/onnxruntime   # dir with include/onnxruntime_c_api.h
 ```
 
-Your app links `libonnxruntime` when it builds its executable. (Unverified in this repo — it needs the
-ORT native library; `CallbackOnnxSession` with your own runner is the simpler, verified path.)
+Your app links `libonnxruntime` when it builds its executable.
+
+**Verified in CI**, on `linuxX64` against the ONNX Runtime release the version catalog pins: the
+`onnx-c-interop` job downloads it and runs `src/nativeOrtTest/kotlin/OnnxCApiInteropTest.kt`, which
+goes through `OrtGetApiBase()` to reach the API struct and then creates and releases a real `OrtEnv`
+and `OrtSessionOptions` through its function pointers. That indirection is the part that either works
+or does not; headers that merely parse prove nothing about it.
+
+Two honest limits. Only `linuxX64` is exercised — the `.def` is the same on every native target, but
+macOS and Windows are not run. And the bindings are *bindings*: kromus ships no `OnnxSession` over
+them, so you still write an `OnnxRunner` against the generated `onnxruntime.*` declarations and wrap
+it in `CallbackOnnxSession`, which remains the simpler path if you already have an ORT binding.
 
 ## Asymmetric models (E5, etc.)
 
