@@ -89,8 +89,8 @@ A skipped entity stays untracked, so the next snapshot that contains it tries ag
 ## Writing in the background, searching in the foreground
 
 A kromus index is single-writer and not thread-safe. That is fine when one coroutine owns it, and not
-fine in the usual on-device shape — a sync writing while the UI searches. `.concurrent()` wraps an
-index in a `Mutex`:
+fine in the usual on-device shape — a sync writing while the UI searches. `.concurrent()` puts a
+readers-writer lock around it, so searches run alongside each other and a writer runs alone:
 
 ```kotlin
 val index = HybridIndex<String>(dimensions = 384).concurrent()
@@ -101,7 +101,19 @@ val hits = index.search(embed(query), text = query, k = 10)
 ```
 
 The `syncTo` overloads for a wrapped index run the embedding outside the lock, so the slow part never
-blocks a reader. Anything the wrapper does not expose is reachable through `use { }`.
+blocks a reader. Anything the wrapper does not expose is reachable through `read { }` alongside other
+readers, or `use { }` exclusively — `use` takes the lock for writing, because a block it cannot
+inspect may mutate.
+
+The lock is **writer-preferring**: once the sync is waiting, arriving searches queue behind it. Without
+that, a screen issuing a steady stream of queries would hold the read side open indefinitely and the
+index would quietly stop following the data.
+
+Searches scale with cores — 8× on eight of them at 50 000 vectors — because each reader gets its own
+traversal state from a pooled `searcher()`. That is worth knowing about because it constrains the
+wrapper's internals more than it looks: a first version guarded both the lock and the pool with a
+plain `Mutex`, which was correct and pointless, holding six readers to the throughput of one. Guarding
+work that takes microseconds with bookkeeping that takes microseconds buys nothing.
 
 ## Anything that emits snapshots
 
