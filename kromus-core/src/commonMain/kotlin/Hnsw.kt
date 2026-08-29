@@ -50,23 +50,13 @@ internal class Hnsw private constructor(
     private val rng = Random(config.seed)
     private val levelMultiplier = 1.0 / ln(config.m.toDouble())
 
-    // --- per-search scratch, reused across calls (single-writer contract) ---
+    // --- traversal scratch ---
+    //
+    // The state of a traversal lives in a SearchScratch, not here, so two traversals can run at once
+    // given one each. This is the index's own, used by every write and by the ordinary single-threaded
+    // read path, which keeps their allocation profile exactly as it was.
 
-    private val frontier = FloatHeap(minHeap = true)
-    private val best = FloatHeap(minHeap = false)
-
-    // Visited set as marks + a monotonic epoch: O(1) test and mark, no per-node boxing, and no
-    // clearing between searches (a stale mark simply predates the current epoch).
-    private var visitMarks = IntArray(0)
-    private var visitEpoch = 0
-
-    // Output of the most recent searchLayer: ids ascending by distance, with those distances.
-    private var layerIds = IntArray(0)
-    private var layerDists = FloatArray(0)
-    private var layerCount = 0
-
-    /** Distance of the node last returned by [greedyClosest], so callers need not recompute it. */
-    private var greedyDistance = 0f
+    private val ownScratch = SearchScratch()
 
     /** Number of vectors ever inserted, including flagged-deleted ones (== the id space size). */
     val capacity: Int get() = store.size
@@ -111,8 +101,8 @@ internal class Hnsw private constructor(
         var currDist = store.distanceToQuery(prepared, curr)
         var lc = topLayer
         while (lc > level) {
-            curr = greedyClosest(prepared, curr, currDist, lc)
-            currDist = greedyDistance
+            curr = greedyClosest(ownScratch, prepared, curr, currDist, lc)
+            currDist = ownScratch.greedyDistance
             lc--
         }
 
@@ -121,8 +111,8 @@ internal class Hnsw private constructor(
         var entryPoints = intArrayOf(curr)
         lc = if (level < topLayer) level else topLayer
         while (lc >= 0) {
-            searchLayer(prepared, entryPoints, config.efConstruction, lc, Int.MAX_VALUE, ACCEPT_ALL)
-            val candidates = layerIds.copyOf(layerCount)
+            searchLayer(ownScratch, prepared, entryPoints, config.efConstruction, lc, Int.MAX_VALUE, ACCEPT_ALL)
+            val candidates = ownScratch.layerIds.copyOf(ownScratch.layerCount)
             val selected = selectNeighbors(id, candidates, candidates.size, config.m)
             val mMax = if (lc == 0) config.maxM0 else config.m
 
@@ -167,6 +157,7 @@ internal class Hnsw private constructor(
         ef: Int,
         maxVisited: Int,
         accept: (Int) -> Boolean = ACCEPT_ALL,
+        scratch: SearchScratch = ownScratch,
     ): Hits {
         if (entryPoint == -1) return Hits.EMPTY
         val q = prepare(rawVector)
@@ -175,8 +166,8 @@ internal class Hnsw private constructor(
         var currDist = store.distanceToQuery(q, curr)
         var lc = topLayer
         while (lc > 0) {
-            curr = greedyClosest(q, curr, currDist, lc)
-            currDist = greedyDistance
+            curr = greedyClosest(scratch, q, curr, currDist, lc)
+            currDist = scratch.greedyDistance
             lc--
         }
 
@@ -187,20 +178,26 @@ internal class Hnsw private constructor(
             else -> maxVisited
         }
         val acceptable = { id: Int -> !deletedFlags[id] && accept(id) }
-        searchLayer(q, intArrayOf(curr), efEff, 0, budget, acceptable)
+        searchLayer(scratch, q, intArrayOf(curr), efEff, 0, budget, acceptable)
 
-        val n = if (layerCount < k) layerCount else k
+        val n = if (scratch.layerCount < k) scratch.layerCount else k
         val ids = IntArray(n)
         val scores = FloatArray(n)
         for (i in 0 until n) {
-            ids[i] = layerIds[i]
-            scores[i] = similarityOf(layerDists[i])
+            ids[i] = scratch.layerIds[i]
+            scores[i] = similarityOf(scratch.layerDists[i])
         }
         return Hits(ids, scores)
     }
 
     /** Walks greedily to the closest node reachable from [start] on [layer] (hill climbing, ef = 1). */
-    private fun greedyClosest(query: FloatArray, start: Int, startDist: Float, layer: Int): Int {
+    private fun greedyClosest(
+        scratch: SearchScratch,
+        query: FloatArray,
+        start: Int,
+        startDist: Float,
+        layer: Int,
+    ): Int {
         var curr = start
         var currDist = startDist
         var improved = true
@@ -219,7 +216,7 @@ internal class Hnsw private constructor(
                 }
             }
         }
-        greedyDistance = currDist
+        scratch.greedyDistance = currDist
         return curr
     }
 
@@ -233,6 +230,7 @@ internal class Hnsw private constructor(
      * of allocating: the layer search runs once per layer per insert and once per query.
      */
     private fun searchLayer(
+        scratch: SearchScratch,
         query: FloatArray,
         entryPoints: IntArray,
         ef: Int,
@@ -240,7 +238,9 @@ internal class Hnsw private constructor(
         maxVisited: Int,
         acceptable: (Int) -> Boolean,
     ) {
-        beginVisits()
+        val frontier = scratch.frontier
+        val best = scratch.best
+        scratch.beginVisits(nodeCount)
         frontier.clear()
         best.clear()
         frontier.reserve(ef)
@@ -248,7 +248,7 @@ internal class Hnsw private constructor(
         var visits = 0
 
         for (ep in entryPoints) {
-            if (!visit(ep)) continue
+            if (!scratch.visit(ep)) continue
             visits++
             val d = store.distanceToQuery(query, ep)
             frontier.push(ep, d)
@@ -266,7 +266,7 @@ internal class Hnsw private constructor(
             val nb = neighborsAt(c, layer) ?: continue
             for (i in 0 until nb.size) {
                 val e = nb[i]
-                if (!visit(e)) continue
+                if (!scratch.visit(e)) continue
                 visits++
                 val d = store.distanceToQuery(query, e)
                 // Explore whenever results aren't full yet or this node beats the current worst.
@@ -282,13 +282,13 @@ internal class Hnsw private constructor(
             }
         }
 
-        layerCount = best.size
-        ensureLayerCapacity(layerCount)
-        var i = layerCount - 1
+        scratch.layerCount = best.size
+        scratch.ensureLayerCapacity(scratch.layerCount)
+        var i = scratch.layerCount - 1
         while (!best.isEmpty()) {
             val d = best.peekKey()
-            layerIds[i] = best.pop()
-            layerDists[i] = d
+            scratch.layerIds[i] = best.pop()
+            scratch.layerDists[i] = d
             i--
         }
     }
@@ -360,29 +360,6 @@ internal class Hnsw private constructor(
         if (dirtyFlags[id]) return
         dirtyFlags[id] = true
         dirtyIds.add(id)
-    }
-
-    private fun ensureLayerCapacity(needed: Int) {
-        if (layerIds.size >= needed) return
-        layerIds = IntArray(needed)
-        layerDists = FloatArray(needed)
-    }
-
-    /** Opens a new visited epoch, resizing (and, on the rare wrap, clearing) the mark array. */
-    private fun beginVisits() {
-        if (visitMarks.size < nodeCount) visitMarks = visitMarks.copyOf(maxOf(nodeCount, visitMarks.size * 2))
-        if (visitEpoch == Int.MAX_VALUE) {
-            visitMarks.fill(0)
-            visitEpoch = 0
-        }
-        visitEpoch++
-    }
-
-    /** Marks [id] visited in the current epoch; false if it was already visited. */
-    private fun visit(id: Int): Boolean {
-        if (visitMarks[id] == visitEpoch) return false
-        visitMarks[id] = visitEpoch
-        return true
     }
 
     /** Normalizes for Cosine (so dot == cosine), otherwise copies defensively. */
