@@ -186,7 +186,7 @@ val index = try {
 Encoding is deterministic: the same index content produces the same bytes on every platform, so an
 index can be content-hashed, cached by digest, or compared in a test.
 
-The optional **`kromus-kemus`** module stores an index in a [kemus](https://github.com/kormium/kemus)
+The optional **[`kromus-kemus`](kromus-kemus/)** module stores an index in a [kemus](https://github.com/kormium/kemus)
 store (binary value), so it inherits kemus's persistence, TTL and offline→online sync — build once,
 reload instantly:
 
@@ -397,7 +397,7 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 5. **Quantization** ✅ int8 (~4×) and binary (~32×) quantization, asymmetric full-precision queries.
 6. **Metadata filters** ✅ string attributes + `MetadataFilter`, applied mid-traversal for vectors.
 7. **Analyzers** ✅ pluggable tokenizer: stemming, stop-words, CJK/substring n-grams.
-8. **kemus storage** ✅ optional `kromus-kemus` adapter — persist an index into a
+8. **kemus storage** ✅ optional [`kromus-kemus`](kromus-kemus/) adapter — persist an index into a
    [kemus](https://github.com/kormium/kemus) store (embedded / offline→online sync).
 9. **Re-rank** ✅ `rerank(query, candidates, k) { fullVector }` — two-phase search for quantized indexes.
 10. **Embeddings** ✅ optional [`kromus-onnx`](kromus-onnx/) — a `TextEmbedder` whose pipeline is shared
