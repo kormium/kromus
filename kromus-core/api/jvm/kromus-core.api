@@ -40,6 +40,14 @@ public final class io/github/kromus/Bm25Config {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/github/kromus/ByteArraySource : io/github/kromus/ByteSource {
+	public fun <init> ([BII)V
+	public synthetic fun <init> ([BIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	public fun getSize ()I
+	public fun read (II[BI)V
+}
+
 public final class io/github/kromus/ByteBuffersKt {
 	public static final fun checksumOf ([BII)J
 	public static synthetic fun checksumOf$default ([BIIILjava/lang/Object;)J
@@ -61,6 +69,23 @@ public final class io/github/kromus/ByteReader {
 	public final fun long ()J
 	public final fun short ()I
 	public final fun shortCount (ILjava/lang/String;)I
+}
+
+public abstract interface class io/github/kromus/ByteSource {
+	public fun close ()V
+	public abstract fun getSize ()I
+	public abstract fun read (II[BI)V
+	public static synthetic fun read$default (Lio/github/kromus/ByteSource;II[BIILjava/lang/Object;)V
+}
+
+public final class io/github/kromus/ByteSource$DefaultImpls {
+	public static fun close (Lio/github/kromus/ByteSource;)V
+	public static synthetic fun read$default (Lio/github/kromus/ByteSource;II[BIILjava/lang/Object;)V
+}
+
+public final class io/github/kromus/ByteSourceKt {
+	public static final fun checkRange (III)V
+	public static final fun slice (Lio/github/kromus/ByteSource;II)Lio/github/kromus/ByteSource;
 }
 
 public final class io/github/kromus/ByteWriter {
@@ -85,8 +110,12 @@ public final class io/github/kromus/ContainerKt {
 }
 
 public final class io/github/kromus/ContainerReader {
+	public fun <init> (Lio/github/kromus/ByteSource;IILjava/lang/String;)V
+	public synthetic fun <init> (Lio/github/kromus/ByteSource;IILjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> ([BIILjava/lang/String;)V
+	public synthetic fun <init> ([BIILjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getProvenance ()Ljava/lang/String;
+	public final fun getSource ()Lio/github/kromus/ByteSource;
 	public final fun has (Ljava/lang/String;)Z
 	public final fun lengthOf (Ljava/lang/String;)I
 	public final fun offsetOf (Ljava/lang/String;)I
@@ -124,8 +153,8 @@ public final class io/github/kromus/FlatPersistenceKt {
 	public static synthetic fun decodeFlatIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/FlatIndex;
 	public static final fun encodeToByteArray (Lio/github/kromus/FlatIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
 	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/FlatIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
-	public static final fun viewFlatIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;)Lio/github/kromus/FlatIndex;
-	public static synthetic fun viewFlatIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/FlatIndex;
+	public static final fun openFlatIndex (Lio/github/kromus/ByteSource;Lio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/FlatIndex;
+	public static synthetic fun openFlatIndex$default (Lio/github/kromus/ByteSource;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/FlatIndex;
 }
 
 public final class io/github/kromus/FlatSearcher : io/github/kromus/Searcher {
@@ -309,8 +338,8 @@ public final class io/github/kromus/IvfPersistenceKt {
 	public static synthetic fun decodeIvfIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/IvfIndex;
 	public static final fun encodeToByteArray (Lio/github/kromus/IvfIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
 	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/IvfIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
-	public static final fun viewIvfIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;)Lio/github/kromus/IvfIndex;
-	public static synthetic fun viewIvfIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/IvfIndex;
+	public static final fun openIvfIndex (Lio/github/kromus/ByteSource;Lio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/IvfIndex;
+	public static synthetic fun openIvfIndex$default (Lio/github/kromus/ByteSource;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/IvfIndex;
 }
 
 public final class io/github/kromus/IvfPresets {
@@ -338,6 +367,7 @@ public final class io/github/kromus/KeyCodec$Companion {
 }
 
 public final class io/github/kromus/KromusFormatException : java/lang/IllegalArgumentException {
+	public fun <init> (Ljava/lang/String;)V
 }
 
 public final class io/github/kromus/Metric : java/lang/Enum {
@@ -460,16 +490,6 @@ public final class io/github/kromus/TextIndex {
 	public final fun search (Ljava/lang/String;ILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/TextIndex;Ljava/lang/String;ILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public final fun updateAttributes (Ljava/lang/Object;Ljava/util/Map;)Z
-}
-
-public abstract interface class io/github/kromus/VectorBlocks {
-	public fun close ()V
-	public abstract fun getSize ()I
-	public abstract fun read (II[B)V
-}
-
-public final class io/github/kromus/VectorBlocks$DefaultImpls {
-	public static fun close (Lio/github/kromus/VectorBlocks;)V
 }
 
 public final class io/github/kromus/VectorIndex : io/github/kromus/VectorSearch {

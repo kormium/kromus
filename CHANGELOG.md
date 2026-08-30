@@ -7,9 +7,60 @@ with what it takes to migrate.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once 1.0 lands.
 
-## [Unreleased]
+## [0.16.0] — 2026-08-30
 
 ### Added
+
+- **An index can now be searched from a file.** `openIvfIndex` and `openFlatIndex` take a `ByteSource`
+  and read through it: only the header and the small sections are loaded — centroids, the cluster
+  table, keys, attributes — and the vector region, which is the bulk, stays where it is until a query
+  asks for a cluster. That cluster then arrives as one contiguous run, which is the arrangement the
+  clustered index exists for.
+
+  This is the piece that turns the whole design from an argument into a capability. Until now the only
+  source read from the same array the index was loaded from, which proved the path and reclaimed
+  nothing; the ceiling was still memory. It is storage now.
+
+  The cost is measured on the access pattern rather than asserted: opening a 600-entry index reads
+  less than its vector section occupies, and ten queries at `nprobe = 3` together read less than the
+  file. The assertions are against the size of the vector region, not against numbers chosen to pass.
+
+- **`ByteSource`** — where an index's bytes come from, and the fourth public seam. Three methods:
+  `size`, `read(offset, length, into, at)` and `close()`. `ByteArraySource` reads from memory;
+  anything else — a decrypting reader, an Android `AssetFileDescriptor`, a virtual file system, a
+  cache that fetches and spills — is this interface and nothing more.
+
+  It replaces `VectorBlocks`, which was narrower (a vector region, not a container) and never shipped.
+  `ContainerReader` now reads from a source as well as from an array, through one header parser rather
+  than two, and `KromusFormatException`'s constructor is public so a source of your own can report the
+  same failures the library's own do.
+
+  The rule that is not optional: **`read` must fill exactly what was asked for.** Returning early is
+  the one failure this interface cannot detect — a partly-filled buffer leaves whatever was there
+  before in the tail, and the scan reads it as vector data. Nothing throws, and the query comes back
+  with neighbours that are merely plausible.
+
+- **[`kromus-files`](kromus-files/)** — a new optional module with a file-backed source for every
+  platform that has synchronous file access: `FileByteSource` on JVM and Android (positional
+  `FileChannel` reads, so one open file serves every searching thread) and on iOS, macOS, Linux and
+  Windows (`fopen`/`fseek`/`fread`); `NodeFileByteSource` under Node for both Kotlin/JS and
+  Kotlin/Wasm; `OpfsByteSource` in the browser for both. `openRange` opens an index packed inside a
+  larger file, which is the shape an Android asset arrives in.
+
+  It is a separate artifact because `kromus-core` is common code and nothing else — four interop
+  surfaces do not belong in a module whose whole claim is that it has none. The seam stays in core, so
+  a source of your own needs only core.
+
+  In the browser the only synchronous read is OPFS's `createSyncAccessHandle`, which exists **only
+  inside a Web Worker** — a constraint of the platform. `OpfsByteSource` takes an already-open handle
+  rather than opening one, so everything asynchronous stays with the caller.
+
+  Every source is held to one shared contract: read the same bytes an array does at every offset,
+  honour the destination offset, refuse ranges outside itself, refuse reads after closing, and loop
+  rather than trust a handle that reads short. The OPFS pair is tested against a stand-in handle that
+  reproduces the browser's contract, short reads included; the binding to the browser's own object is
+  not exercised by CI, because a test runner drives the main thread and a real handle cannot be
+  created there.
 
 - **`IvfIndex`** — a second index type that groups the corpus instead of linking it into a
   graph, searching only the groups nearest a query.
@@ -65,13 +116,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `VectorSearch` is what an index is from a caller's side; `VectorStore` is the quantizer seam, now
   carrying its own byte layout so persistence no longer switches on the built-in types;
   `ContainerWriter`/`ContainerReader` hand a third-party index the whole file format, checksums and
-  provenance included; `VectorBlocks` is where vectors are read from.
+  provenance included; `ByteSource` is where an index's bytes come from.
 
   A custom store is accepted by all three index types and by each `decode…` function; `VectorIndex`
   keeps the factory, since `compact()` and `clear()` rebuild the graph and would otherwise rebuild it
   on different storage. Section lengths are now checked against the store's own `strideBytes` rather
   than a table of the built-in layouts, so a file read with a store of the wrong width is refused
-  before a record is read. Streaming (`viewIvfIndex`/`viewFlatIndex`) does not take one: that scan
+  before a record is read. Streaming (`openIvfIndex`/`openFlatIndex`) does not take one: that scan
   reads stored bytes directly and knows only the built-in layouts.
 
   A test builds an int4 quantizer entirely from public API — under flat, graph and inverted file, it
@@ -81,20 +132,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `Metric` stays closed on purpose: exhaustive `when` over it is what lets each quantizer specialize
   its arithmetic, the binary store's lookup table among them.
 
-- **`VectorBlocks`** and **`viewIvfIndex`** — a clustered index can read its vectors a cluster at
-  a time instead of holding them. Each probed cluster is a contiguous run, so it arrives as one read
-  and the distance loop runs over a plain array with no indirection per vector.
+- **A clustered index reads its vectors a cluster at a time** instead of holding them. Each probed
+  cluster is a contiguous run, so it arrives as one read and the distance loop runs over a plain array
+  with no indirection per vector.
 
   A streamed index returns identical results to a resident one — the byte-scanning distances are a
   second implementation of the same arithmetic, and a second implementation that disagreed anywhere
   would return quietly wrong neighbours rather than fail, so the tests hold them to matching score for
-  score across quantizations and metrics.
-
-  The only source today reads from the same array the index was loaded from, which proves the path and
-  saves nothing. Reclaiming the memory needs a source that is not the heap, and that needs the
-  container reader to work over random access rather than a whole `ByteArray` — see #30. Binary
-  quantization is refused: its query path is built per query, and its codes are small enough that
-  there is nothing to reclaim.
+  score across quantizations and metrics. Binary quantization is refused: its query path is built per
+  query, and its codes are small enough that there is nothing to reclaim.
 
 - **`IvfSearcher`** — holds the buffer a streamed cluster is read into, so repeated queries do not
   each allocate one a whole cluster wide. One per thread; different searchers run in parallel, and
@@ -104,30 +150,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   cluster is a contiguous run, so the probe list *is* the read plan; useful for sizing a cache and for
   measuring a file-backed index without assuming clusters are evenly sized, which k-means never
   promises.
-
-### Changed
-
-- **Every index is now a container of named sections** rather than one interleaved stream. Sections
-  are homogeneous, so fields are sized for what they hold rather than for the widest thing beside
-  them; each carries a checksum, so corruption is located rather than merely noticed; and each is
-  contiguous, so a reader can take the graph without the vectors.
-
-  A node level is two bytes rather than four, a deleted flag one bit rather than eight, a neighbour
-  count two bytes, and a neighbour link two bytes wherever the index holds 65 536 nodes or fewer.
-  Every integer is read unsigned — with a signed short that last threshold would be 32 768, and links
-  are the whole of the adjacency section. Measured at 50 000 vectors × 128 dimensions: **30.7 → 27.8
-  MiB** full precision, **12.5 → 9.7 MiB** int8, **7.0 → 4.2 MiB** binary.
-
-  Tags are four ASCII characters, so a hex dump of an index is readable by eye.
-
-### Migration
-
-- **The persistence format changed** (vector v7, text v6, hybrid v5) and 0.16.0 blobs cannot be read.
-  They are rejected with a `KromusFormatException`; catch it and rebuild, as before.
-
-## [0.16.0] — 2026-08-29
-
-### Added
 
 - **`encodeDelta`** on all three indexes, with `decodeVectorIndex` / `decodeTextIndex` /
   `decodeHybridIndex` overloads that take a base snapshot plus the deltas recorded after it. A full
@@ -200,15 +222,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **Every index is now a container of named sections** rather than one interleaved stream. Sections
+  are homogeneous, so fields are sized for what they hold rather than for the widest thing beside
+  them; each carries a checksum, so corruption is located rather than merely noticed; and each is
+  contiguous, so a reader can take the graph without the vectors.
+
+  A node level is two bytes rather than four, a deleted flag one bit rather than eight, a neighbour
+  count two bytes, and a neighbour link two bytes wherever the index holds 65 536 nodes or fewer.
+  Every integer is read unsigned — with a signed short that last threshold would be 32 768, and links
+  are the whole of the adjacency section. Measured at 50 000 vectors × 128 dimensions: **30.7 → 27.8
+  MiB** full precision, **12.5 → 9.7 MiB** int8, **7.0 → 4.2 MiB** binary.
+
+  Tags are four ASCII characters, so a hex dump of an index is readable by eye.
+
 - `encodeToByteArray` now also **checkpoints** the index: `dirtyNodes` drops to zero and later
   `encodeDelta` calls chain onto those bytes. Keep what it returns — a delta written against a
   snapshot you discarded has nothing to be applied to.
 
 ### Migration
 
-- **The persistence format changed** (vector v6, text v5, hybrid v4) and 0.15.0 blobs cannot be read.
-  They are rejected with a `KromusFormatException`, so catch it and rebuild, exactly as for the 0.15.0
-  move:
+- **The persistence format changed** (vector v7, text v6, hybrid v5) and 0.15.0 blobs cannot be read.
+  The layout moved twice during development — first to the sectioned container, then to the denser
+  field widths inside it — but only the end of that appears here, because nothing in between was ever
+  published. They are rejected with a `KromusFormatException`, so catch it and rebuild:
 
   ```kotlin
   val index = try {

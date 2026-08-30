@@ -77,6 +77,7 @@ kotlin {
         implementation("io.github.kormium:kromus-core:0.16.0")
 
         // Optional companion modules — see their own readmes for details.
+        implementation("io.github.kormium:kromus-files:0.16.0") // search an index from a file
         implementation("io.github.kormium:kromus-kemus:0.16.0") // persist into a kemus store
         implementation("io.github.kormium:kromus-onnx:0.16.0")  // on-device text embedder
         implementation("io.github.kormium:kromus-sync:0.16.0")  // keep an index fresh from a Flow
@@ -267,21 +268,62 @@ val index = IvfIndex.build(
   each list contiguous.
 
 The fourth part of the design, postings that live on disk rather than in memory, is a loader rather
-than a setting — see [`viewIvfIndex`](#reading-vectors-without-holding-them).
+than a setting — see [`openIvfIndex`](#reading-vectors-without-holding-them).
 
 #### Reading vectors without holding them
 
-`viewIvfIndex` and `viewFlatIndex` load an index that reads its vectors through `VectorBlocks` — one
-list at a time for IVF, in batches for a flat scan — instead of inflating them. Centroids, the list
-table and the keys stay resident; they are a few megabytes where the vectors are tens.
+`openIvfIndex` and `openFlatIndex` take a `ByteSource` and read through it — one list at a time for
+IVF, in batches for a flat scan — instead of inflating the file. Only the header and the small
+sections are read when the index opens: centroids, the list table, keys and attributes, a few
+megabytes where the vectors are tens. The vector region is not touched until a query asks for a
+cluster.
 
-The source that ships today reads from the same array the index was loaded from, which proves the path
-and reclaims nothing. A source backed by a file is [#30](https://github.com/kormium/kromus/issues/30).
+```kotlin
+val source = FileByteSource.open("$filesDir/catalogue.krm")   // kromus-files
+val index = openIvfIndex(source, KeyCodec.string)
+
+val hits = index.search(queryVector, 10)   // reads the probed clusters, nothing else
+source.close()                              // the index stops working here, not before
+```
+
+`ByteArraySource` over a blob you already hold is the honest baseline rather than a saving — the array
+is still there. The memory is reclaimed when the source reads from somewhere that is not the heap.
+
+**What that costs, measured on the access pattern rather than argued:** opening a 600-entry index
+reads less than its vector section occupies, and ten queries at `nprobe = 3` together read less than
+the file — the assertions are in `ByteSourceTest`, against the size of the vector region rather than
+against a number chosen to pass.
+
+`kromus-files` ships a source for every platform that has synchronous file access:
+
+| source | where | notes |
+| --- | --- | --- |
+| `FileByteSource` | JVM, Android | positional `FileChannel` reads; one open file serves every thread |
+| `FileByteSource` | iOS, macOS, Linux, Windows | buffered `fopen`/`fseek`/`fread`; one source per thread |
+| `NodeFileByteSource` | Node (JS and Wasm) | `fs.readSync` |
+| `OpfsByteSource` | browser (JS and Wasm) | **worker only** — see below |
+
+`openRange` on the first three opens an index packed inside a larger file, which is the shape an
+Android asset arrives in: an `AssetFileDescriptor` gives the APK's path with the entry's offset and
+length. Note that an APK asset is compressed by default and cannot be read at an offset at all —
+either mark it `noCompress`, or copy it into `filesDir` once on first run.
+
+In the browser, the only synchronous file read is OPFS's `createSyncAccessHandle`, and it exists
+**only inside a Web Worker**. That is a constraint of the platform, not a choice made here — so a
+file-backed search runs in a worker and posts its results back, which is where a scan over thousands
+of vectors belongs anyway. `OpfsByteSource` takes an already-open handle rather than opening one, so
+that everything asynchronous stays with the caller and `ByteSource` can stay synchronous.
+
+Honest about coverage: the OPFS sources are tested against a stand-in handle that reproduces the
+browser's contract, including reads that return fewer bytes than asked for. The binding to the
+browser's own object is not exercised by CI, because a test runner drives the main thread and a real
+handle cannot be created there.
 
 ### Writing your own
 
 The three index types are implementations, not the extent of what fits. Four seams are public so that
-a structure or a quantizer kromus does not ship can be added without waiting for it to be added here.
+a structure, a quantizer or a place to read bytes from that kromus does not ship can be added without
+waiting for it to be added here.
 
 **`VectorSearch<K>`** — what an index is, from a caller's side: dimensions, metric, keys, and a
 `searcher()`. Write against it and the choice between flat, graph and inverted file becomes
@@ -327,10 +369,22 @@ product quantization — and `rerank`, the other half of that pipeline, already 
 provenance, a kind byte and a version. An index of your own gets all of it, and the same diagnostics,
 rather than inventing a format beside kromus's.
 
-**`VectorBlocks`** — where vectors are read from. Implement it over a memory-mapped file, a network
-cache, whatever the platform offers, and `viewIvfIndex`/`viewFlatIndex` will read through it. This one
-does not combine with a custom `VectorStore`: a streamed scan reads the stored bytes directly and only
-the built-in layouts are known to it, so a store of your own is decoded rather than streamed.
+**`ByteSource`** — where an index's bytes come from. Three methods: `size`, `read(offset, length,
+into, at)` and `close()`. `kromus-files` implements it over a file on every platform that has
+synchronous file access, and anything else is the same interface and nothing more — a decrypting
+reader, an Android `AssetFileDescriptor`, a virtual file system, a cache that fetches and spills to
+local storage.
+
+The one rule that is not optional: **`read` must fill exactly what was asked for.** Returning early is
+the single failure this interface cannot detect — a partly-filled buffer leaves whatever was there
+before in the tail, and the scan reads it as vector data. Nothing throws, and the query comes back
+with neighbours that are merely plausible. Loop until the range is complete, and throw
+`KromusFormatException` if it cannot be. Every source in `kromus-files` is tested against a stand-in
+that deliberately reads short.
+
+This one does not combine with a custom `VectorStore`: a streamed scan reads the stored bytes directly
+and only the built-in layouts are known to it, so a store of your own is decoded rather than
+streamed.
 
 What is deliberately *not* open is `Metric`. It is a closed enum, and exhaustive `when` over it is what
 lets each quantizer specialize its arithmetic — the binary store's per-query lookup table among them.
@@ -699,7 +753,10 @@ than the core because it needs coroutines, and the core has no dependencies.
 ## Design principles
 
 - **Zero dependencies** in the vector layer. HNSW is arithmetic over `FloatArray` and graph
-  structures in common code — no coroutines, serialization, crypto or native interop.
+  structures in common code — no coroutines, serialization, crypto or native interop. That holds for
+  `kromus-core` in full: reading an index from a file needs platform APIs, so the interface lives in
+  core and the implementations live in `kromus-files`, which is optional and separate for exactly
+  this reason.
 - **Deterministic.** Level assignment is seeded (`HnswConfig.seed`), float arithmetic runs in a fixed
   order, BM25 scores accumulate in query order and break ties by insertion order, and serialization
   writes records by id rather than by hash iteration order. So an index built from the same data on
@@ -741,7 +798,14 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
 19. **Sectioned format** ✅ every index is a container of named, checksummed sections — denser, locatable
     corruption, and readable in parts.
 20. **Clustered index** ✅ `IvfIndex` groups the corpus instead of linking it, trading recall for
-    the contiguity a file-backed index needs.
+    the contiguity a file-backed index needs; `IvfConfig.assignments` and `.routing` make it a SPANN
+    one, and `FlatIndex` is exhaustive search for when an index is not needed at all.
+21. **Open seams** ✅ `VectorSearch`, `VectorStore`, `ContainerWriter`/`ContainerReader` and
+    `ByteSource` are public, so an index type, a quantizer or a source of bytes kromus does not ship
+    can be written against the same format and the same guarantees.
+22. **Search from a file** ✅ `openIvfIndex`/`openFlatIndex` read through a `ByteSource`, and
+    [`kromus-files`](kromus-files/) implements one on JVM, Android, iOS, macOS, Linux, Windows, Node
+    and the browser (OPFS, in a worker). The ceiling stops being memory and becomes storage.
 
 Next: multi-value and numeric metadata filters, an incremental "add to a persisted index without a
 full re-encode" path, and SIMD-friendly distance kernels where a platform offers them without

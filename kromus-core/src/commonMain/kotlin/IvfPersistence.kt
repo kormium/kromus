@@ -97,7 +97,13 @@ public fun <K> decodeIvfIndex(
     keyCodec: KeyCodec<K>,
     expect: String? = null,
     store: VectorStoreFactory? = null,
-): IvfIndex<K> = decodeIvfIndex(bytes, keyCodec, expect, skipVectors = false, factory = store).index
+): IvfIndex<K> =
+    decodeIvfIndex(
+        ContainerReader(bytes, KIND_IVF, IVF_FORMAT, expect),
+        keyCodec,
+        skipVectors = false,
+        factory = store,
+    ).index
 
 /** A decoded index, plus where its vectors sit in the bytes it came from. */
 internal class LoadedIvfIndex<K>(
@@ -107,14 +113,11 @@ internal class LoadedIvfIndex<K>(
 )
 
 internal fun <K> decodeIvfIndex(
-    bytes: ByteArray,
+    c: ContainerReader,
     keyCodec: KeyCodec<K>,
-    expect: String?,
     skipVectors: Boolean,
     factory: VectorStoreFactory? = null,
 ): LoadedIvfIndex<K> {
-    val c = ContainerReader(bytes, KIND_IVF, IVF_FORMAT, expect)
-
     val cfg = c.section(S_CONFIG)
     val dimensions = cfg.int()
     if (dimensions < 1) throw KromusFormatException("corrupt kromus index: dimensions $dimensions")
@@ -235,39 +238,40 @@ internal fun <K> decodeIvfIndex(
 }
 
 /**
- * Loads a clustered index that reads its vectors from [vectors] instead of holding them.
+ * Opens a clustered index that reads its vectors from [source] instead of holding them.
  *
- * Everything else — centroids, the cluster table, keys and attributes — is small and stays resident;
- * on a 50 000-entry index that is a few megabytes against tens for the vectors. Each probed cluster
- * arrives as one contiguous run when a query needs it, which is the arrangement the whole index type
- * exists for.
+ * Only the header and the small sections are read: centroids, the cluster table, keys and attributes.
+ * On a 50 000-entry index that is a few megabytes against tens for the vectors, and the vectors are
+ * never read at all until a query asks for a cluster — which then arrives as one contiguous run, the
+ * arrangement this whole index type exists for.
  *
- * Pass [vectors] as `null` to read them from [bytes] itself. That is the honest baseline rather than a
- * saving: the array is still held, so this form is for testing the path and for platforms with no file
- * to map. The memory is reclaimed only when [vectors] reads from somewhere that is not the heap.
+ * Pass a [ByteArraySource] over a blob already in memory and this is an honest baseline rather than a
+ * saving: the array is still held. The memory is reclaimed when [source] reads from somewhere that is
+ * not the heap — a file, through `kromus-files` or a [ByteSource] of your own.
+ *
+ * The index keeps [source] open for as long as it can be searched; closing it invalidates the index.
  *
  * There is no custom-store parameter here, unlike [decodeIvfIndex], for the same reason binary is
  * refused below: a streamed scan reads the stored bytes directly, and only the built-in layouts are
  * known to it. A store of your own has to be decoded rather than streamed.
  *
- * @throws KromusFormatException if [bytes] are not a clustered index this build can read, or if the
- *   quantization is [Quantization.Binary], whose query path is a per-query lookup table that a
+ * @throws KromusFormatException if [source] does not hold a clustered index this build can read, or if
+ *   the quantization is [Quantization.Binary], whose query path is a per-query lookup table that a
  *   byte-scanning copy could only duplicate or silently disagree with — and whose codes are small
  *   enough that streaming them saves nothing worth the risk.
  */
-public fun <K> viewIvfIndex(
-    bytes: ByteArray,
+public fun <K> openIvfIndex(
+    source: ByteSource,
     keyCodec: KeyCodec<K>,
-    vectors: VectorBlocks? = null,
     expect: String? = null,
 ): IvfIndex<K> {
-    val loaded = decodeIvfIndex(bytes, keyCodec, expect, skipVectors = true, factory = null)
+    val c = ContainerReader(source, KIND_IVF, IVF_FORMAT, expect)
+    val loaded = decodeIvfIndex(c, keyCodec, skipVectors = true, factory = null)
     if (!BlockDistance.supports(loaded.index.config.quantization)) {
         throw KromusFormatException(
             "a ${loaded.index.config.quantization} clustered index cannot be streamed: its query path " +
                 "is built per query, and its vectors are small enough that there is nothing to reclaim",
         )
     }
-    val blocks = vectors ?: ResidentBlocks(bytes, loaded.vectorsOffset, loaded.vectorsLength)
-    return loaded.index.streaming(blocks)
+    return loaded.index.streaming(source.slice(loaded.vectorsOffset, loaded.vectorsLength))
 }

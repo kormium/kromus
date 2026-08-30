@@ -94,7 +94,7 @@ public object IvfPresets {
      *   whichever side a query arrives from.
      *
      * The fourth choice — postings that live on disk rather than in memory — is not a setting but a
-     * loader: see [viewIvfIndex].
+     * loader: see [openIvfIndex].
      *
      * Storage grows with [assignments]: a vector written into two lists is stored twice. That is the
      * trade the design makes on purpose, disk being cheaper than the recall lost at a boundary, and
@@ -182,10 +182,10 @@ public class IvfIndex<K> internal constructor(
     /**
      * Where vectors are read from when the index does not hold them, or null when it does.
      *
-     * Set by [viewIvfIndex]: the index keeps its centroids, cluster table and keys resident —
+     * Set by [openIvfIndex]: the index keeps its centroids, cluster table and keys resident —
      * a few megabytes — and reads each probed cluster's vectors as a run when a query needs them.
      */
-    internal val blocks: VectorBlocks?,
+    internal val blocks: ByteSource?,
     /** Clusters a query probes unless told otherwise — measured at build time when not set. */
     public val nprobe: Int,
     /**
@@ -280,7 +280,7 @@ public class IvfIndex<K> internal constructor(
     internal val strideBytes: Int get() = store.strideBytes
 
     /** The same index, reading its vectors from [source] rather than holding them. */
-    internal fun streaming(source: VectorBlocks): IvfIndex<K> =
+    internal fun streaming(source: ByteSource): IvfIndex<K> =
         IvfIndex(
             dimensions,
             metric,

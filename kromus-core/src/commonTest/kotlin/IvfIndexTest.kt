@@ -299,7 +299,7 @@ class IvfIndexTest {
                 )
                 val blob = index.encodeToByteArray(KeyCodec.int)
                 val resident = decodeIvfIndex(blob, KeyCodec.int)
-                val streamed = viewIvfIndex(blob, KeyCodec.int)
+                val streamed = openIvfIndex(ByteArraySource(blob), KeyCodec.int)
 
                 val rng = Random(52)
                 repeat(15) {
@@ -321,7 +321,7 @@ class IvfIndexTest {
     fun aStreamedSearcherReusesItsBufferAcrossQueries() {
         val data = corpus(400, 53)
         val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 12, nprobe = 3))
-        val streamed = viewIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+        val streamed = openIvfIndex(ByteArraySource(index.encodeToByteArray(KeyCodec.int)), KeyCodec.int)
 
         val searcher = streamed.searcher()
         val q = data[9]
@@ -340,7 +340,7 @@ class IvfIndexTest {
             config = IvfConfig(clusters = 8, quantization = Quantization.Binary),
         )
         val blob = index.encodeToByteArray(KeyCodec.int)
-        val failure = assertFailsWith<KromusFormatException> { viewIvfIndex(blob, KeyCodec.int) }
+        val failure = assertFailsWith<KromusFormatException> { openIvfIndex(ByteArraySource(blob), KeyCodec.int) }
         assertTrue("Binary" in failure.message!!, failure.message!!)
         // ...and loads normally, which is the whole reason refusing is acceptable.
         assertEquals(200, decodeIvfIndex(blob, KeyCodec.int).size)
@@ -397,7 +397,7 @@ class IvfIndexTest {
         )
         val blob = index.encodeToByteArray(KeyCodec.int)
         val reloaded = decodeIvfIndex(blob, KeyCodec.int)
-        val streamed = viewIvfIndex(blob, KeyCodec.int)
+        val streamed = openIvfIndex(ByteArraySource(blob), KeyCodec.int)
 
         assertEquals(index.size, reloaded.size)
         assertEquals(index.storedVectors, reloaded.storedVectors)

@@ -98,7 +98,7 @@ class FlatIndexTest {
                 val index = FlatIndex.build(dim, entries(v), metric = metric, quantization = quantization)
                 val blob = index.encodeToByteArray(KeyCodec.int)
                 val resident = decodeFlatIndex(blob, KeyCodec.int)
-                val streamed = viewFlatIndex(blob, KeyCodec.int)
+                val streamed = openFlatIndex(ByteArraySource(blob), KeyCodec.int)
                 val q = v[13]
                 assertSameResults(
                     resident.search(q, 10),

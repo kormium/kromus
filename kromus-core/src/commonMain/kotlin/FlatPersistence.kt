@@ -59,33 +59,37 @@ public fun <K> decodeFlatIndex(
     keyCodec: KeyCodec<K>,
     expect: String? = null,
     store: VectorStoreFactory? = null,
-): FlatIndex<K> = readFlatIndex(bytes, keyCodec, expect, skipVectors = false, factory = store).index
+): FlatIndex<K> =
+    readFlatIndex(
+        ContainerReader(bytes, KIND_FLAT, FLAT_FORMAT, expect),
+        keyCodec,
+        skipVectors = false,
+        factory = store,
+    ).index
 
 /**
- * Loads an exhaustive index that reads its vectors from [vectors] instead of holding them, in batches
+ * Opens an exhaustive index that reads its vectors from [source] instead of holding them, in batches
  * rather than whole — a flat index has no partitions to bound a read by.
  *
- * Pass `null` to read from [bytes] itself; see [viewIvfIndex] for why that form saves nothing.
- *
- * There is no custom-store parameter here, unlike [decodeFlatIndex]: a streamed scan reads the
- * stored bytes directly and only the built-in layouts are known to it, so a store of your own has
+ * See [openIvfIndex] for what stays resident, and for why a [ByteArraySource] is a baseline rather
+ * than a saving. There is no custom-store parameter, unlike [decodeFlatIndex]: a streamed scan reads
+ * the stored bytes directly and only the built-in layouts are known to it, so a store of your own has
  * to be decoded rather than streamed.
  */
-public fun <K> viewFlatIndex(
-    bytes: ByteArray,
+public fun <K> openFlatIndex(
+    source: ByteSource,
     keyCodec: KeyCodec<K>,
-    vectors: VectorBlocks? = null,
     expect: String? = null,
 ): FlatIndex<K> {
-    val loaded = readFlatIndex(bytes, keyCodec, expect, skipVectors = true, factory = null)
+    val c = ContainerReader(source, KIND_FLAT, FLAT_FORMAT, expect)
+    val loaded = readFlatIndex(c, keyCodec, skipVectors = true, factory = null)
     if (!BlockDistance.supports(loaded.index.quantization)) {
         throw KromusFormatException(
             "a ${loaded.index.quantization} flat index cannot be streamed: its query path is built " +
                 "per query, and its vectors are small enough that there is nothing to reclaim",
         )
     }
-    val blocks = vectors ?: ResidentBlocks(bytes, loaded.vectorsOffset, loaded.vectorsLength)
-    return loaded.index.streaming(blocks)
+    return loaded.index.streaming(source.slice(loaded.vectorsOffset, loaded.vectorsLength))
 }
 
 private class LoadedFlatIndex<K>(
@@ -95,14 +99,11 @@ private class LoadedFlatIndex<K>(
 )
 
 private fun <K> readFlatIndex(
-    bytes: ByteArray,
+    c: ContainerReader,
     keyCodec: KeyCodec<K>,
-    expect: String?,
     skipVectors: Boolean,
     factory: VectorStoreFactory?,
 ): LoadedFlatIndex<K> {
-    val c = ContainerReader(bytes, KIND_FLAT, FLAT_FORMAT, expect)
-
     val cfg = c.section(S_CONFIG)
     val dimensions = cfg.int()
     if (dimensions < 1) throw KromusFormatException("corrupt kromus index: dimensions $dimensions")

@@ -106,9 +106,82 @@ public class ContainerWriter(
     }
 }
 
-/** Reads a container: verifies the header, then hands out sections by tag. */
-public class ContainerReader(
-    private val bytes: ByteArray,
+/**
+ * How many bytes to ask a source for before the header's real length is known.
+ *
+ * The header is a fixed part, an optional provenance string of any length, and a table sized by the
+ * section count — so its length cannot be computed until some of it has been read. One generous probe
+ * covers every index the library writes; a longer provenance costs one more read, not a guess.
+ */
+private const val HEADER_PROBE = 512
+
+/**
+ * Total header bytes, or null when [available] is not yet enough to tell.
+ *
+ * Parsed without a [ByteReader] so that "not enough yet" is a return value rather than an exception —
+ * this runs in a loop that grows the probe, and control flow through a format error would hide a real
+ * one.
+ */
+private fun headerLength(p: ByteArray, available: Int): Int? {
+    if (available < FIXED_HEADER + 1) return null
+    var at = FIXED_HEADER
+    val present = p[at].toInt() and 0xFF
+    at += 1
+    if (present == 1) {
+        if (available < at + 4) return null
+        val n = ((p[at].toInt() and 0xFF) shl 24) or ((p[at + 1].toInt() and 0xFF) shl 16) or
+            ((p[at + 2].toInt() and 0xFF) shl 8) or (p[at + 3].toInt() and 0xFF)
+        if (n < 0) throw KromusFormatException("corrupt kromus index: provenance claims $n byte(s)")
+        at += 4 + n
+        if (at < 0) throw KromusFormatException("corrupt kromus index: header overflows")
+    }
+    if (available < at + 2) return null
+    val count = ((p[at].toInt() and 0xFF) shl 8) or (p[at + 1].toInt() and 0xFF)
+    return at + 2 + count * TABLE_ENTRY
+}
+
+/** Reads just the header of [source], growing the probe until the whole of it is in hand. */
+private fun headerOf(source: ByteSource): ByteArray {
+    var want = if (source.size < HEADER_PROBE) source.size else HEADER_PROBE
+    if (want < FIXED_HEADER) {
+        throw KromusFormatException("not a kromus index: only ${source.size} byte(s), need at least $FIXED_HEADER")
+    }
+    while (true) {
+        val buf = ByteArray(want)
+        source.read(0, want, buf)
+        val need = headerLength(buf, want)
+        if (need != null && need <= want) return if (need == want) buf else buf.copyOf(need)
+        val next = need ?: (want * 2)
+        if (next > source.size || next <= want) {
+            throw KromusFormatException(
+                "truncated kromus index: its header needs $next byte(s), the source holds ${source.size}",
+            )
+        }
+        want = next
+    }
+}
+
+/**
+ * Reads a container: verifies the header, then hands out sections by tag.
+ *
+ * Two ways in, one implementation. Given a [ByteArray] the whole file is already in hand, and a
+ * section is handed out as a window onto it — nothing is copied. Given a [ByteSource] only the header
+ * is read up front, and a section is read from the source when it is asked for, which is what lets an
+ * index leave the bulk of a file where it is. Both parse the same header the same way, because a
+ * second parser that drifted would accept a file the first rejects.
+ */
+public class ContainerReader private constructor(
+    /**
+     * Where this container reads from, so a caller can address a section without copying it.
+     *
+     * This is how an index leaves its vectors where they are: take the offset and length of the vector
+     * section, [ByteSource.slice] them, and read through that instead of inflating the section.
+     */
+    public val source: ByteSource,
+    // Set only when the caller already had the whole file as an array: lets a section be a window
+    // rather than a copy. Not part of ByteSource — a source is not obliged to be an array, and the
+    // seam should not carry an optimization that only one implementation can satisfy.
+    private val whole: ByteArray?,
     kind: Int,
     version: Int,
     expect: String?,
@@ -120,14 +193,23 @@ public class ContainerReader(
 
     public val provenance: String?
 
+    /** Reads a container held entirely in memory. */
+    public constructor(bytes: ByteArray, kind: Int, version: Int, expect: String? = null) :
+        this(ByteArraySource(bytes), bytes, kind, version, expect)
+
+    /** Reads a container from [source], touching only its header until a section is asked for. */
+    public constructor(source: ByteSource, kind: Int, version: Int, expect: String? = null) :
+        this(source, null, kind, version, expect)
+
     init {
-        val r = ByteReader(bytes)
+        val header = whole ?: headerOf(source)
+        val r = ByteReader(header)
         if (r.remaining < FIXED_HEADER) {
             throw KromusFormatException("not a kromus index: only ${r.remaining} byte(s), need at least $FIXED_HEADER")
         }
         if (r.byte() != MAGIC_0 || r.byte() != MAGIC_1 || r.byte() != MAGIC_2 || r.byte() != MAGIC_3) {
             throw KromusFormatException(
-                "not a kromus index: bad magic (anything written by kromus 0.16 or earlier has a " +
+                "not a kromus index: bad magic (anything written by kromus 0.15 or earlier has a " +
                     "different layout and must be rebuilt)",
             )
         }
@@ -154,10 +236,10 @@ public class ContainerReader(
             val offset = r.int()
             val length = r.int()
             val checksum = r.long()
-            if (offset < 0 || length < 0 || offset.toLong() + length > bytes.size) {
+            if (offset < 0 || length < 0 || offset.toLong() + length > source.size) {
                 throw KromusFormatException(
                     "corrupt kromus index: section '$tag' claims $length byte(s) at $offset, " +
-                        "outside a ${bytes.size}-byte file",
+                        "outside a ${source.size}-byte file",
                 )
             }
             offsets[tag] = offset
@@ -178,8 +260,11 @@ public class ContainerReader(
     public fun sectionBytes(tag: String): ByteArray {
         val offset = offsetOf(tag)
         val length = lengthOf(tag)
-        section(tag) // verifies the checksum
-        return bytes.copyOfRange(offset, offset + length)
+        if (whole != null) {
+            verify(tag, whole, offset, length, offset)
+            return whole.copyOfRange(offset, offset + length)
+        }
+        return read(tag, offset, length)
     }
 
     /**
@@ -192,16 +277,32 @@ public class ContainerReader(
     public fun section(tag: String): ByteReader {
         val offset = offsetOf(tag)
         val length = lengthOf(tag)
-        if (verified.add(tag)) {
-            val actual = checksumOf(bytes, offset, length)
-            if (actual != checksums[tag]) {
-                throw KromusFormatException(
-                    "corrupt kromus index: section '$tag' does not match its checksum — " +
-                        "$length byte(s) at $offset have been altered or truncated in transit",
-                )
-            }
+        if (whole != null) {
+            verify(tag, whole, offset, length, offset)
+            return ByteReader(whole, offset, length)
         }
-        return ByteReader(bytes, offset, length)
+        return ByteReader(read(tag, offset, length))
+    }
+
+    private fun read(tag: String, offset: Int, length: Int): ByteArray {
+        val buf = ByteArray(length)
+        source.read(offset, length, buf)
+        verify(tag, buf, 0, length, offset)
+        return buf
+    }
+
+    // A section held in the whole-file array is the same bytes on every call, so verifying it once is
+    // enough. One read from a source is not the same bytes as the next, so that path always verifies —
+    // it just paid for a read, and the checksum over what it read is the cheap half.
+    private fun verify(tag: String, buf: ByteArray, from: Int, length: Int, reportedAt: Int) {
+        if (whole != null && !verified.add(tag)) return
+        val actual = checksumOf(buf, from, length)
+        if (actual != checksums[tag]) {
+            throw KromusFormatException(
+                "corrupt kromus index: section '$tag' does not match its checksum — " +
+                    "$length byte(s) at $reportedAt have been altered or truncated in transit",
+            )
+        }
     }
 }
 

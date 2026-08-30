@@ -1,0 +1,70 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64, iosX64, js, linuxArm64, linuxX64, macosArm64, macosX64, mingwX64, wasmJs]
+// Alias: native => [iosArm64, iosSimulatorArm64, iosX64, linuxArm64, linuxX64, macosArm64, macosX64, mingwX64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <io.github.kormium:kromus-files>
+// Targets: [native]
+final class io.github.kromus.files/FileByteSource : io.github.kromus/ByteSource { // io.github.kromus.files/FileByteSource|null[0]
+    final val size // io.github.kromus.files/FileByteSource.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // io.github.kromus.files/FileByteSource.size.<get-size>|<get-size>(){}[0]
+
+    final fun close() // io.github.kromus.files/FileByteSource.close|close(){}[0]
+    final fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/Int) // io.github.kromus.files/FileByteSource.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.Int){}[0]
+
+    final object Companion { // io.github.kromus.files/FileByteSource.Companion|null[0]
+        final fun open(kotlin/String): io.github.kromus.files/FileByteSource // io.github.kromus.files/FileByteSource.Companion.open|open(kotlin.String){}[0]
+        final fun openRange(kotlin/String, kotlin/Long, kotlin/Int): io.github.kromus.files/FileByteSource // io.github.kromus.files/FileByteSource.Companion.openRange|openRange(kotlin.String;kotlin.Long;kotlin.Int){}[0]
+    }
+}
+
+// Targets: [js, wasmJs]
+final class io.github.kromus.files/NodeFileByteSource : io.github.kromus/ByteSource { // io.github.kromus.files/NodeFileByteSource|null[0]
+    final val size // io.github.kromus.files/NodeFileByteSource.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // io.github.kromus.files/NodeFileByteSource.size.<get-size>|<get-size>(){}[0]
+
+    final fun close() // io.github.kromus.files/NodeFileByteSource.close|close(){}[0]
+    final fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/Int) // io.github.kromus.files/NodeFileByteSource.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.Int){}[0]
+
+    final object Companion { // io.github.kromus.files/NodeFileByteSource.Companion|null[0]
+        final fun open(kotlin/String): io.github.kromus.files/NodeFileByteSource // io.github.kromus.files/NodeFileByteSource.Companion.open|open(kotlin.String){}[0]
+        final fun openRange(kotlin/String, kotlin/Int, kotlin/Int): io.github.kromus.files/NodeFileByteSource // io.github.kromus.files/NodeFileByteSource.Companion.openRange|openRange(kotlin.String;kotlin.Int;kotlin.Int){}[0]
+    }
+}
+
+// Targets: [js, wasmJs]
+final class io.github.kromus.files/OpfsByteSource : io.github.kromus/ByteSource { // io.github.kromus.files/OpfsByteSource|null[0]
+    final val size // io.github.kromus.files/OpfsByteSource.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // io.github.kromus.files/OpfsByteSource.size.<get-size>|<get-size>(){}[0]
+
+    final fun close() // io.github.kromus.files/OpfsByteSource.close|close(){}[0]
+    final fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/Int) // io.github.kromus.files/OpfsByteSource.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.Int){}[0]
+
+    final object Companion { // io.github.kromus.files/OpfsByteSource.Companion|null[0]
+        final fun open(io.github.kromus.files/FileSystemSyncAccessHandle): io.github.kromus.files/OpfsByteSource // io.github.kromus.files/OpfsByteSource.Companion.open|open(io.github.kromus.files.FileSystemSyncAccessHandle){}[0]
+        final fun openRange(io.github.kromus.files/FileSystemSyncAccessHandle, kotlin/Int, kotlin/Int): io.github.kromus.files/OpfsByteSource // io.github.kromus.files/OpfsByteSource.Companion.openRange|openRange(io.github.kromus.files.FileSystemSyncAccessHandle;kotlin.Int;kotlin.Int){}[0]
+    }
+}
+
+// Targets: [js]
+abstract interface io.github.kromus.files/FileSystemSyncAccessHandle { // io.github.kromus.files/FileSystemSyncAccessHandle|null[0]
+    abstract fun close() // io.github.kromus.files/FileSystemSyncAccessHandle.close|close(){}[0]
+    abstract fun getSize(): kotlin/Double // io.github.kromus.files/FileSystemSyncAccessHandle.getSize|getSize(){}[0]
+    abstract fun read(org.khronos.webgl/Int8Array, io.github.kromus.files/OpfsReadOptions): kotlin/Double // io.github.kromus.files/FileSystemSyncAccessHandle.read|read(org.khronos.webgl.Int8Array;io.github.kromus.files.OpfsReadOptions){}[0]
+}
+
+// Targets: [js]
+abstract interface io.github.kromus.files/OpfsReadOptions { // io.github.kromus.files/OpfsReadOptions|null[0]
+    abstract var at // io.github.kromus.files/OpfsReadOptions.at|{}at[0]
+        abstract fun <get-at>(): kotlin/Double // io.github.kromus.files/OpfsReadOptions.at.<get-at>|<get-at>(){}[0]
+        abstract fun <set-at>(kotlin/Double) // io.github.kromus.files/OpfsReadOptions.at.<set-at>|<set-at>(kotlin.Double){}[0]
+}
+
+// Targets: [wasmJs]
+abstract interface io.github.kromus.files/FileSystemSyncAccessHandle : kotlin.js/JsAny { // io.github.kromus.files/FileSystemSyncAccessHandle|null[0]
+    abstract fun close() // io.github.kromus.files/FileSystemSyncAccessHandle.close|close(){}[0]
+    abstract fun getSize(): kotlin/Double // io.github.kromus.files/FileSystemSyncAccessHandle.getSize|getSize(){}[0]
+}

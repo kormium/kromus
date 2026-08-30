@@ -3,38 +3,6 @@ package io.github.kromus
 import kotlin.math.sqrt
 
 /**
- * Where a clustered index's vectors come from.
- *
- * The unit is a *block* — one cluster's worth of contiguous bytes — rather than a single vector, and
- * that is the whole design. A cluster is read as a run, which is what makes a clustered index cheap on
- * a file in the first place, and it means the distance loop runs over a plain array with no indirection
- * per element. One call per cluster, not one per vector.
- *
- * Implementations need not be thread-safe; a searcher takes one.
- */
-public interface VectorBlocks {
-    /** Total bytes of vector data available. */
-    public val size: Int
-
-    /** Copies [length] bytes starting at [offset] into the front of [into]. */
-    public fun read(offset: Int, length: Int, into: ByteArray)
-
-    /** Releases whatever the source holds. Idempotent. */
-    public fun close() {}
-}
-
-/** Vectors already in memory — the ordinary case, and the fallback where a file cannot be mapped. */
-internal class ResidentBlocks(
-    private val bytes: ByteArray,
-    private val base: Int,
-    override val size: Int,
-) : VectorBlocks {
-    override fun read(offset: Int, length: Int, into: ByteArray) {
-        bytes.copyInto(into, 0, base + offset, base + offset + length)
-    }
-}
-
-/**
  * Distances from a query to a run of stored vectors, read straight out of a byte block.
  *
  * These mirror [VectorStore]'s arithmetic exactly — the same expressions, reading from bytes instead

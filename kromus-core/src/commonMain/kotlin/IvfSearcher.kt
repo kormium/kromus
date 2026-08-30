@@ -88,7 +88,7 @@ public class IvfSearcher<K> internal constructor(
                 }
             }
         }
-        return top.toSortedList().map { SearchResult(it.key, index.similarity((-it.score).toFloat())) }
+        return top.toSortedList().map { SearchResult(it.key, index.similarity(-it.score)) }
     }
 
     /** False when this stored copy's entry has already been offered by an earlier list. */

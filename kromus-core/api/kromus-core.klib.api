@@ -96,12 +96,12 @@ abstract interface <#A: kotlin/Any?> io.github.kromus/VectorSearch { // io.githu
     open fun search(kotlin/FloatArray, kotlin/Int, kotlin/Function1<kotlin.collections/Map<kotlin/String, kotlin/String>, kotlin/Boolean>? = ...): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/VectorSearch.search|search(kotlin.FloatArray;kotlin.Int;kotlin.Function1<kotlin.collections.Map<kotlin.String,kotlin.String>,kotlin.Boolean>?){}[0]
 }
 
-abstract interface io.github.kromus/VectorBlocks { // io.github.kromus/VectorBlocks|null[0]
-    abstract val size // io.github.kromus/VectorBlocks.size|{}size[0]
-        abstract fun <get-size>(): kotlin/Int // io.github.kromus/VectorBlocks.size.<get-size>|<get-size>(){}[0]
+abstract interface io.github.kromus/ByteSource { // io.github.kromus/ByteSource|null[0]
+    abstract val size // io.github.kromus/ByteSource.size|{}size[0]
+        abstract fun <get-size>(): kotlin/Int // io.github.kromus/ByteSource.size.<get-size>|<get-size>(){}[0]
 
-    abstract fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray) // io.github.kromus/VectorBlocks.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray){}[0]
-    open fun close() // io.github.kromus/VectorBlocks.close|close(){}[0]
+    abstract fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/Int = ...) // io.github.kromus/ByteSource.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.Int){}[0]
+    open fun close() // io.github.kromus/ByteSource.close|close(){}[0]
 }
 
 abstract interface io.github.kromus/VectorStore { // io.github.kromus/VectorStore|null[0]
@@ -353,6 +353,15 @@ final class io.github.kromus/Bm25Config { // io.github.kromus/Bm25Config|null[0]
     final fun toString(): kotlin/String // io.github.kromus/Bm25Config.toString|toString(){}[0]
 }
 
+final class io.github.kromus/ByteArraySource : io.github.kromus/ByteSource { // io.github.kromus/ByteArraySource|null[0]
+    constructor <init>(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ...) // io.github.kromus/ByteArraySource.<init>|<init>(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
+
+    final val size // io.github.kromus/ByteArraySource.size|{}size[0]
+        final fun <get-size>(): kotlin/Int // io.github.kromus/ByteArraySource.size.<get-size>|<get-size>(){}[0]
+
+    final fun read(kotlin/Int, kotlin/Int, kotlin/ByteArray, kotlin/Int) // io.github.kromus/ByteArraySource.read|read(kotlin.Int;kotlin.Int;kotlin.ByteArray;kotlin.Int){}[0]
+}
+
 final class io.github.kromus/ByteReader { // io.github.kromus/ByteReader|null[0]
     constructor <init>(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ...) // io.github.kromus/ByteReader.<init>|<init>(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
 
@@ -388,10 +397,13 @@ final class io.github.kromus/ByteWriter { // io.github.kromus/ByteWriter|null[0]
 }
 
 final class io.github.kromus/ContainerReader { // io.github.kromus/ContainerReader|null[0]
-    constructor <init>(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/String?) // io.github.kromus/ContainerReader.<init>|<init>(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.String?){}[0]
+    constructor <init>(io.github.kromus/ByteSource, kotlin/Int, kotlin/Int, kotlin/String? = ...) // io.github.kromus/ContainerReader.<init>|<init>(io.github.kromus.ByteSource;kotlin.Int;kotlin.Int;kotlin.String?){}[0]
+    constructor <init>(kotlin/ByteArray, kotlin/Int, kotlin/Int, kotlin/String? = ...) // io.github.kromus/ContainerReader.<init>|<init>(kotlin.ByteArray;kotlin.Int;kotlin.Int;kotlin.String?){}[0]
 
     final val provenance // io.github.kromus/ContainerReader.provenance|{}provenance[0]
         final fun <get-provenance>(): kotlin/String? // io.github.kromus/ContainerReader.provenance.<get-provenance>|<get-provenance>(){}[0]
+    final val source // io.github.kromus/ContainerReader.source|{}source[0]
+        final fun <get-source>(): io.github.kromus/ByteSource // io.github.kromus/ContainerReader.source.<get-source>|<get-source>(){}[0]
 
     final fun has(kotlin/String): kotlin/Boolean // io.github.kromus/ContainerReader.has|has(kotlin.String){}[0]
     final fun lengthOf(kotlin/String): kotlin/Int // io.github.kromus/ContainerReader.lengthOf|lengthOf(kotlin.String){}[0]
@@ -516,7 +528,9 @@ final class io.github.kromus/IvfConfig { // io.github.kromus/IvfConfig|null[0]
     final fun toString(): kotlin/String // io.github.kromus/IvfConfig.toString|toString(){}[0]
 }
 
-final class io.github.kromus/KromusFormatException : kotlin/IllegalArgumentException // io.github.kromus/KromusFormatException|null[0]
+final class io.github.kromus/KromusFormatException : kotlin/IllegalArgumentException { // io.github.kromus/KromusFormatException|null[0]
+    constructor <init>(kotlin/String) // io.github.kromus/KromusFormatException.<init>|<init>(kotlin.String){}[0]
+}
 
 final class io.github.kromus/StringPoolReader { // io.github.kromus/StringPoolReader|null[0]
     constructor <init>(io.github.kromus/ByteReader) // io.github.kromus/StringPoolReader.<init>|<init>(io.github.kromus.ByteReader){}[0]
@@ -549,6 +563,7 @@ final object io.github.kromus/Stopwords { // io.github.kromus/Stopwords|null[0]
 
 final fun (io.github.kromus/ByteReader).io.github.kromus/deltaHeader(kotlin/Int, kotlin/Int) // io.github.kromus/deltaHeader|deltaHeader@io.github.kromus.ByteReader(kotlin.Int;kotlin.Int){}[0]
 final fun (io.github.kromus/ByteReader).io.github.kromus/provenance(kotlin/String?): kotlin/String? // io.github.kromus/provenance|provenance@io.github.kromus.ByteReader(kotlin.String?){}[0]
+final fun (io.github.kromus/ByteSource).io.github.kromus/slice(kotlin/Int, kotlin/Int): io.github.kromus/ByteSource // io.github.kromus/slice|slice@io.github.kromus.ByteSource(kotlin.Int;kotlin.Int){}[0]
 final fun (io.github.kromus/ByteWriter).io.github.kromus/deltaHeader(kotlin/Int, kotlin/Int) // io.github.kromus/deltaHeader|deltaHeader@io.github.kromus.ByteWriter(kotlin.Int;kotlin.Int){}[0]
 final fun (io.github.kromus/ByteWriter).io.github.kromus/provenance(kotlin/String?) // io.github.kromus/provenance|provenance@io.github.kromus.ByteWriter(kotlin.String?){}[0]
 final fun <#A: kotlin/Any?> (io.github.kromus/FlatIndex<#A>).io.github.kromus/encodeToByteArray(io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): kotlin/ByteArray // io.github.kromus/encodeToByteArray|encodeToByteArray@io.github.kromus.FlatIndex<0:0>(io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
@@ -567,9 +582,10 @@ final fun <#A: kotlin/Any?> io.github.kromus/decodeTextIndex(kotlin/ByteArray, i
 final fun <#A: kotlin/Any?> io.github.kromus/decodeTextIndex(kotlin/ByteArray, kotlin.collections/List<kotlin/ByteArray>, io.github.kromus/KeyCodec<#A>, io.github.kromus/Analyzer = ..., kotlin/String? = ...): io.github.kromus/TextIndex<#A> // io.github.kromus/decodeTextIndex|decodeTextIndex(kotlin.ByteArray;kotlin.collections.List<kotlin.ByteArray>;io.github.kromus.KeyCodec<0:0>;io.github.kromus.Analyzer;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/decodeVectorIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, kotlin/String? = ..., io.github.kromus/VectorStoreFactory? = ...): io.github.kromus/VectorIndex<#A> // io.github.kromus/decodeVectorIndex|decodeVectorIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;kotlin.String?;io.github.kromus.VectorStoreFactory?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/decodeVectorIndex(kotlin/ByteArray, kotlin.collections/List<kotlin/ByteArray>, io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): io.github.kromus/VectorIndex<#A> // io.github.kromus/decodeVectorIndex|decodeVectorIndex(kotlin.ByteArray;kotlin.collections.List<kotlin.ByteArray>;io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> io.github.kromus/openFlatIndex(io.github.kromus/ByteSource, io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): io.github.kromus/FlatIndex<#A> // io.github.kromus/openFlatIndex|openFlatIndex(io.github.kromus.ByteSource;io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
+final fun <#A: kotlin/Any?> io.github.kromus/openIvfIndex(io.github.kromus/ByteSource, io.github.kromus/KeyCodec<#A>, kotlin/String? = ...): io.github.kromus/IvfIndex<#A> // io.github.kromus/openIvfIndex|openIvfIndex(io.github.kromus.ByteSource;io.github.kromus.KeyCodec<0:0>;kotlin.String?){0§<kotlin.Any?>}[0]
 final fun <#A: kotlin/Any?> io.github.kromus/rerank(kotlin/FloatArray, kotlin.collections/List<#A>, kotlin/Int, io.github.kromus/Metric = ..., kotlin/Function1<#A, kotlin/FloatArray?>): kotlin.collections/List<io.github.kromus/SearchResult<#A>> // io.github.kromus/rerank|rerank(kotlin.FloatArray;kotlin.collections.List<0:0>;kotlin.Int;io.github.kromus.Metric;kotlin.Function1<0:0,kotlin.FloatArray?>){0§<kotlin.Any?>}[0]
-final fun <#A: kotlin/Any?> io.github.kromus/viewFlatIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, io.github.kromus/VectorBlocks? = ..., kotlin/String? = ...): io.github.kromus/FlatIndex<#A> // io.github.kromus/viewFlatIndex|viewFlatIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;io.github.kromus.VectorBlocks?;kotlin.String?){0§<kotlin.Any?>}[0]
-final fun <#A: kotlin/Any?> io.github.kromus/viewIvfIndex(kotlin/ByteArray, io.github.kromus/KeyCodec<#A>, io.github.kromus/VectorBlocks? = ..., kotlin/String? = ...): io.github.kromus/IvfIndex<#A> // io.github.kromus/viewIvfIndex|viewIvfIndex(kotlin.ByteArray;io.github.kromus.KeyCodec<0:0>;io.github.kromus.VectorBlocks?;kotlin.String?){0§<kotlin.Any?>}[0]
+final fun io.github.kromus/checkRange(kotlin/Int, kotlin/Int, kotlin/Int) // io.github.kromus/checkRange|checkRange(kotlin.Int;kotlin.Int;kotlin.Int){}[0]
 final fun io.github.kromus/checksumOf(kotlin/ByteArray, kotlin/Int = ..., kotlin/Int = ...): kotlin/Long // io.github.kromus/checksumOf|checksumOf(kotlin.ByteArray;kotlin.Int;kotlin.Int){}[0]
 final fun io.github.kromus/kindName(kotlin/Int): kotlin/String // io.github.kromus/kindName|kindName(kotlin.Int){}[0]
 final fun io.github.kromus/metricDistance(kotlin/FloatArray, kotlin/FloatArray, io.github.kromus/Metric): kotlin/Float // io.github.kromus/metricDistance|metricDistance(kotlin.FloatArray;kotlin.FloatArray;io.github.kromus.Metric){}[0]

@@ -17,7 +17,7 @@ package io.github.kromus
  * thousand vectors upward and the gap only widens — 50 000 vectors take about 13 ms a query here
  * against 167 µs for the graph.
  *
- * Like [IvfIndex] this is built rather than grown, and can read its vectors from [VectorBlocks] rather
+ * Like [IvfIndex] this is built rather than grown, and can read its vectors from [ByteSource] rather
  * than hold them.
  */
 public class FlatIndex<K> internal constructor(
@@ -27,7 +27,7 @@ public class FlatIndex<K> internal constructor(
     internal val store: VectorStore,
     internal val keyOf: List<K>,
     internal val attrsOf: List<Map<String, String>>,
-    internal val blocks: VectorBlocks?,
+    internal val blocks: ByteSource?,
 ) : VectorSearch<K> {
     private val idOf: Map<K, Int> = buildMap(keyOf.size) { keyOf.forEachIndexed { id, key -> put(key, id) } }
 
@@ -60,7 +60,7 @@ public class FlatIndex<K> internal constructor(
     }
 
     /** The same index, reading its vectors from [source] rather than holding them. */
-    internal fun streaming(source: VectorBlocks): FlatIndex<K> =
+    internal fun streaming(source: ByteSource): FlatIndex<K> =
         FlatIndex(dimensions, metric, quantization, store, keyOf, attrsOf, source)
 
     public companion object {
@@ -162,6 +162,6 @@ public class FlatSearcher<K> internal constructor(
                 from += count
             }
         }
-        return top.toSortedList().map { SearchResult(it.key, index.similarity((-it.score).toFloat())) }
+        return top.toSortedList().map { SearchResult(it.key, index.similarity(-it.score)) }
     }
 }
