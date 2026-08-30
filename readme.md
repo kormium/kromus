@@ -211,41 +211,131 @@ reads parallel, not reads-and-writes concurrent. If something is writing — a s
 fresh — use [`kromus-sync`](kromus-sync/)'s `.concurrent()` wrapper, which arranges both: searches run
 alongside each other, a writer runs alone, and a writer is not starved by a steady stream of searches.
 
-### Two index types
+### Three index types
 
-`VectorIndex` builds a graph. `ClusteredIndex` splits the corpus into groups and searches only the
-groups nearest a query. They answer the same question and trade differently.
+| | what it is | when |
+| --- | --- | --- |
+| `FlatIndex` | exhaustive scan, no structure | small corpora, and as the exact answer to check the others against |
+| `VectorIndex` | HNSW graph | the index is resident and queried in the same process |
+| `IvfIndex` | inverted file: k-means centroids, one list per centroid, `nprobe` lists opened per query | the index is built elsewhere and read from a file |
+
+They are the standard structures under their standard names, so what is known about tuning each
+applies here unchanged.
 
 ```kotlin
-val index = ClusteredIndex.build(
-    dimensions = 384,
-    entries = documents.map { ClusterEntry(it.id, embed(it.text), it.attributes) },
-)
-val hits = index.search(queryEmbedding, k = 10)
+// exhaustive and exact — no build step, nothing to tune
+val flat = FlatIndex.build(dimensions = 384, entries = docs)
+
+// a graph — the best in-memory structure
+val graph = VectorIndex<String>(dimensions = 384).also { docs.forEach { d -> it.add(d.id, d.vector) } }
+
+// an inverted file — the best structure on a file
+val ivf = IvfIndex.build(dimensions = 384, entries = docs)
 ```
 
-**Nothing to tune to get started.** How many groups a query must open is a property of the data — a
-corpus that partitions cleanly needs one, a corpus that barely partitions needs dozens — so `build`
-measures the corpus and picks. `index.nprobe` is what it chose and `index.estimatedRecall` is what it
-measured that to be worth; the estimate is optimistic on hard corpora, and says so.
+**IVF needs no tuning to start.** How many lists a query must open is a property of the data — one
+where the corpus partitions cleanly, dozens where it barely does — so `build` measures the corpus and
+picks. `index.nprobe` is what it chose and `index.estimatedRecall` what that was measured to be worth;
+the estimate is optimistic on hard corpora and says so.
 
-**The graph is better in memory.** It is guided by real distances to real vectors at every hop, where
-a clustered index commits to a set of groups before looking at a single point — a neighbour just
-across a boundary is missed unless that group is probed.
+**The graph is better in memory**, because it is guided by real distances to real vectors at every hop
+where a partitioned index commits to a set of lists before looking at a single point. **The inverted
+file is better on a file**, because a list is a contiguous run: at equal recall on clusterable data
+that is 10 pages read against 43. No arrangement of a file gives a graph the same thing — its access
+pattern is the algorithm.
 
-**The clustered index is better on a file.** Its groups are contiguous runs of bytes, so a query reads
-a handful of runs rather than pages scattered across the index. At equal recall on clusterable data
-that is 10 pages against 43; see [the measurements](#graph-versus-clusters-at-equal-recall). No
-arrangement of a file gives a graph the same thing, because its access pattern is the algorithm.
+#### SPANN
 
-**It is built, not grown.** There is no `add`: clustering needs the corpus in hand, and adding without
-redoing it drifts. That matches what it is for — an index assembled on a server or in CI and shipped
-read-only. To change the contents, build again.
+[SPANN](https://arxiv.org/abs/2111.08566) is not a fourth structure. It is `IvfIndex` with three
+choices made together, and it is available as a preset:
 
-**When to reach for which.** If the index lives and changes in the process that queries it, use the
-graph. If it is built elsewhere and shipped, try the clustered one and look at `estimatedRecall`: a
-corpus that needs most of its groups opened is telling you it has no group structure, and the graph
-will serve it better.
+```kotlin
+val index = IvfIndex.build(
+    dimensions = 384,
+    entries = docs,
+    config = IvfPresets.spann(entryCount = docs.size, postingSize = 128),
+)
+```
+
+- **many small lists**, so a query reads little — sized by how many entries a list should hold rather
+  than by a list count, because the size of the read is what matters;
+- **`Routing.Graph`**, because scanning that many centroids would itself become the expensive part —
+  the router is the same HNSW the library already has, applied to the centroids;
+- **redundant assignment**, so a vector near a boundary sits in both lists and stops being lost to
+  whichever side a query arrives from. It costs storage: a vector in two lists is stored twice, which
+  is deliberate — disk is cheaper than the recall lost at a boundary, and the duplicate is what keeps
+  each list contiguous.
+
+The fourth part of the design, postings that live on disk rather than in memory, is a loader rather
+than a setting — see [`viewIvfIndex`](#reading-vectors-without-holding-them).
+
+#### Reading vectors without holding them
+
+`viewIvfIndex` and `viewFlatIndex` load an index that reads its vectors through `VectorBlocks` — one
+list at a time for IVF, in batches for a flat scan — instead of inflating them. Centroids, the list
+table and the keys stay resident; they are a few megabytes where the vectors are tens.
+
+The source that ships today reads from the same array the index was loaded from, which proves the path
+and reclaims nothing. A source backed by a file is [#30](https://github.com/kormium/kromus/issues/30).
+
+### Writing your own
+
+The three index types are implementations, not the extent of what fits. Four seams are public so that
+a structure or a quantizer kromus does not ship can be added without waiting for it to be added here.
+
+**`VectorSearch<K>`** — what an index is, from a caller's side: dimensions, metric, keys, and a
+`searcher()`. Write against it and the choice between flat, graph and inverted file becomes
+configuration rather than a rewrite. A fourth implementation satisfies it by answering queries; nothing
+in it assumes a graph or a partitioning.
+
+**`VectorStore`** — how vectors are stored and how distance to them is computed. This is the quantizer
+seam. The built-in trades are full precision, 8 bits and 1 bit; a different trade is an implementation
+of this interface and nothing else:
+
+```kotlin
+class MyQuantizer(override val dimensions: Int, override val metric: Metric) : VectorStore {
+    override val strideBytes: Int get() = /* bytes one vector takes */
+    override fun add(prepared: FloatArray): Int = /* … */
+    override fun distanceToQuery(query: FloatArray, id: Int): Float = /* … */
+    override fun writeVector(id: Int, out: ByteWriter) { /* … */ }
+    override fun readVector(from: ByteReader) { /* … */ }
+    // distanceBetween, reconstruct, size
+}
+
+val mine = VectorStoreFactory { d, m -> MyQuantizer(d, m) }
+
+val flat = FlatIndex.build(384, entries, store = mine)
+val ivf = IvfIndex.build(384, entries, store = mine)
+val graph = VectorIndex<String>(384, store = mine)
+
+val reloaded = decodeVectorIndex(bytes, KeyCodec.string, store = mine)
+```
+
+All three index types take one, and so does each of `decodeVectorIndex`, `decodeIvfIndex` and
+`decodeFlatIndex`. `VectorIndex` keeps the factory, because `compact()` and `clear()` rebuild the
+graph and would otherwise rebuild it on different storage.
+
+Nothing in the bytes names the quantizer, so the same factory is supplied when reading. That is the
+honest contract: the alternative is a registry of quantizer ids, which buys nothing until more than
+one program reads the file. What *is* checked is the stride — a file whose vector section is not
+`size × strideBytes` long is refused before a record is read, so supplying a store of the wrong width
+fails loudly rather than quietly. One of the same width does not; that much is on you.
+[ScaNN](https://arxiv.org/abs/1908.10396)'s anisotropic quantization is a store; so is int4, so is
+product quantization — and `rerank`, the other half of that pipeline, already ships.
+
+**`ContainerWriter` / `ContainerReader`** — the file format: named sections, per-section checksums,
+provenance, a kind byte and a version. An index of your own gets all of it, and the same diagnostics,
+rather than inventing a format beside kromus's.
+
+**`VectorBlocks`** — where vectors are read from. Implement it over a memory-mapped file, a network
+cache, whatever the platform offers, and `viewIvfIndex`/`viewFlatIndex` will read through it. This one
+does not combine with a custom `VectorStore`: a streamed scan reads the stored bytes directly and only
+the built-in layouts are known to it, so a store of your own is decoded rather than streamed.
+
+What is deliberately *not* open is `Metric`. It is a closed enum, and exhaustive `when` over it is what
+lets each quantizer specialize its arithmetic — the binary store's per-query lookup table among them.
+Opening it means either losing that or asking every store to handle a metric it has never seen; the
+cost is real and the gain smaller than the seams above.
 
 ### Persistence
 
@@ -650,7 +740,7 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
     core; `kromus-sync`'s wrappers pair that with a writer-preferring lock.
 19. **Sectioned format** ✅ every index is a container of named, checksummed sections — denser, locatable
     corruption, and readable in parts.
-20. **Clustered index** ✅ `ClusteredIndex` groups the corpus instead of linking it, trading recall for
+20. **Clustered index** ✅ `IvfIndex` groups the corpus instead of linking it, trading recall for
     the contiguity a file-backed index needs.
 
 Next: multi-value and numeric metadata filters, an incremental "add to a persisted index without a

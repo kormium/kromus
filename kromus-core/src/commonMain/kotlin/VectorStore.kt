@@ -5,25 +5,56 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * Owns the stored vectors for [Hnsw] and computes distances against them, hiding whether they are
- * kept as full floats or quantized. Ids are dense and assignment order; the graph structure lives in
- * [Hnsw]. Distances are "smaller = closer" (see the metric conversions).
+ * How vectors are stored and how distance to them is computed — the seam a quantizer plugs into.
  *
- * Two distance forms mirror how HNSW uses them: a full-precision query vector against a stored one
- * ([distanceToQuery]), and two stored vectors against each other ([distanceBetween], used by the
- * neighbour-selection heuristic).
+ * The built-in implementations trade precision for size: full precision, 8 bits per component, one
+ * bit. A different trade is a different implementation of this interface and nothing else. Anisotropic
+ * quantization, 4-bit codes, product quantization — each is a store, and the indexes above are
+ * indifferent to which one they hold.
+ *
+ * **Vectors arrive prepared**, meaning normalized when the metric is [Metric.Cosine], so a store never
+ * repeats that work and a value read back through [reconstruct] can be stored again unchanged. That is
+ * what makes [VectorIndex.compact] lossless, and a store that breaks it will quietly drift on every
+ * rebuild.
+ *
+ * **Ids are dense and assigned in order**: the first [add] returns 0, and none is ever reused.
+ *
+ * A store is not thread-safe by contract. Concurrent searches are arranged above it — see
+ * [VectorIndex.searcher] — so an implementation may hold scratch of its own, as the binary one does.
  */
-internal interface VectorStore {
-    val dimensions: Int
-    val metric: Metric
-    val size: Int
+public interface VectorStore {
+    public val dimensions: Int
+    public val metric: Metric
+    public val size: Int
+
+    /** Bytes one vector occupies when written by [writeVector]. Must be the same for every vector. */
+    public val strideBytes: Int
 
     /** Stores an already-prepared vector (normalized for Cosine) and returns its id. */
-    fun add(prepared: FloatArray): Int
+    public fun add(prepared: FloatArray): Int
 
-    fun distanceToQuery(query: FloatArray, id: Int): Float
+    /**
+     * Distance from a full-precision [query] to stored vector [id].
+     *
+     * The query is not quantized: a search compares an exact query against approximate storage, which
+     * is what keeps a coarse code usable. Smaller is nearer, whatever the metric.
+     */
+    public fun distanceToQuery(query: FloatArray, id: Int): Float
 
-    fun distanceBetween(a: Int, b: Int): Float
+    /** Distance between two stored vectors, both in whatever approximate form they are held. */
+    public fun distanceBetween(a: Int, b: Int): Float
+
+    /**
+     * Appends vector [id] in exactly [strideBytes] bytes.
+     *
+     * The layout is the store's own; nothing else reads it. It must be deterministic, because it
+     * decides the bytes of every index built on this store, and kromus promises identical content
+     * encodes identically on every target — so no hash iteration order, and floats written by raw bits.
+     */
+    public fun writeVector(id: Int, out: ByteWriter)
+
+    /** Reads back one vector written by [writeVector], appending it as if by [add]. */
+    public fun readVector(from: ByteReader)
 
     /**
      * Reads a stored vector back as floats — exact for full precision, dequantized otherwise. The
@@ -31,11 +62,23 @@ internal interface VectorStore {
      * [Hnsw.addPrepared] reproduces the identical stored representation. That is what makes
      * [VectorIndex.compact] lossless.
      */
-    fun reconstruct(id: Int): FloatArray
+    public fun reconstruct(id: Int): FloatArray
+}
+
+/**
+ * Creates the store an index will hold.
+ *
+ * A custom quantizer is not self-describing: nothing in the bytes says which one wrote them, so the
+ * same factory has to be supplied when the index is built and again when it is read. That is the
+ * honest contract — the alternative is a registry of quantizer ids, which buys nothing until there is
+ * more than one program reading the file.
+ */
+public fun interface VectorStoreFactory {
+    public fun create(dimensions: Int, metric: Metric): VectorStore
 }
 
 /** Shared metric math over two float vectors. */
-internal fun metricDistance(a: FloatArray, b: FloatArray, metric: Metric): Float =
+public fun metricDistance(a: FloatArray, b: FloatArray, metric: Metric): Float =
     when (metric) {
         Metric.Cosine -> {
             var dot = 0f
@@ -58,7 +101,7 @@ internal fun metricDistance(a: FloatArray, b: FloatArray, metric: Metric): Float
     }
 
 /** Exact full-precision storage. */
-internal class Float32VectorStore(
+public class Float32VectorStore(
     override val dimensions: Int,
     override val metric: Metric,
 ) : VectorStore {
@@ -77,10 +120,20 @@ internal class Float32VectorStore(
 
     override fun reconstruct(id: Int): FloatArray = vectors[id].copyOf()
 
-    fun vectorAt(id: Int): FloatArray = vectors[id]
+    public fun vectorAt(id: Int): FloatArray = vectors[id]
+
+    override val strideBytes: Int get() = dimensions * 4
+
+    override fun writeVector(id: Int, out: ByteWriter) {
+        for (x in vectors[id]) out.float(x)
+    }
+
+    override fun readVector(from: ByteReader) {
+        load(FloatArray(dimensions) { from.float() })
+    }
 
     /** Restores a stored vector verbatim (persistence). */
-    fun load(vector: FloatArray): Int {
+    public fun load(vector: FloatArray): Int {
         vectors.add(vector)
         return vectors.size - 1
     }
@@ -94,7 +147,7 @@ internal class Float32VectorStore(
  * enough not to disturb ranking, but scores are marginally off the exact cosine — re-rank with
  * [rerank] when the score value itself matters, not just the order.
  */
-internal class Int8VectorStore(
+public class Int8VectorStore(
     override val dimensions: Int,
     override val metric: Metric,
 ) : VectorStore {
@@ -175,12 +228,23 @@ internal class Int8VectorStore(
         return FloatArray(dimensions) { code[it].toInt() * scale }
     }
 
-    fun codeAt(id: Int): ByteArray = codes[id]
+    public fun codeAt(id: Int): ByteArray = codes[id]
 
-    fun scaleAt(id: Int): Float = scales[id]
+    override val strideBytes: Int get() = dimensions + 4
+
+    override fun writeVector(id: Int, out: ByteWriter) {
+        for (b in codes[id]) out.byte(b.toInt())
+        out.float(scales[id])
+    }
+
+    override fun readVector(from: ByteReader) {
+        load(ByteArray(dimensions) { from.byte().toByte() }, from.float())
+    }
+
+    public fun scaleAt(id: Int): Float = scales[id]
 
     /** Restores a quantized vector verbatim (persistence). */
-    fun load(code: ByteArray, scale: Float): Int {
+    public fun load(code: ByteArray, scale: Float): Int {
         codes.add(code)
         scales.add(scale)
         return codes.size - 1
@@ -198,7 +262,7 @@ internal class Int8VectorStore(
  * still governs the scores you get back and any later re-rank), but do not expect binary quantization
  * to preserve inner-product ranking.
  */
-internal class BinaryVectorStore(
+public class BinaryVectorStore(
     override val dimensions: Int,
     override val metric: Metric,
 ) : VectorStore {
@@ -308,10 +372,20 @@ internal class BinaryVectorStore(
         return FloatArray(dimensions) { signAt(bits, it) }
     }
 
-    fun codeAt(id: Int): LongArray = codes[id]
+    public fun codeAt(id: Int): LongArray = codes[id]
+
+    override val strideBytes: Int get() = words * 8
+
+    override fun writeVector(id: Int, out: ByteWriter) {
+        for (word in codes[id]) out.long(word)
+    }
+
+    override fun readVector(from: ByteReader) {
+        load(LongArray(words) { from.long() })
+    }
 
     /** Restores a quantized vector verbatim (persistence). */
-    fun load(code: LongArray): Int {
+    public fun load(code: LongArray): Int {
         codes.add(code)
         return codes.size - 1
     }

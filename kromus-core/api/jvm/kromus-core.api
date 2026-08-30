@@ -9,6 +9,22 @@ public final class io/github/kromus/Analyzer$Companion {
 	public static synthetic fun standard$default (Lio/github/kromus/Analyzer$Companion;Ljava/util/Set;ILio/github/kromus/Stemmer;ILjava/lang/Object;)Lio/github/kromus/Analyzer;
 }
 
+public final class io/github/kromus/BinaryVectorStore : io/github/kromus/VectorStore {
+	public fun <init> (ILio/github/kromus/Metric;)V
+	public fun add ([F)I
+	public final fun codeAt (I)[J
+	public fun distanceBetween (II)F
+	public fun distanceToQuery ([FI)F
+	public fun getDimensions ()I
+	public fun getMetric ()Lio/github/kromus/Metric;
+	public fun getSize ()I
+	public fun getStrideBytes ()I
+	public final fun load ([J)I
+	public fun readVector (Lio/github/kromus/ByteReader;)V
+	public fun reconstruct (I)[F
+	public fun writeVector (ILio/github/kromus/ByteWriter;)V
+}
+
 public final class io/github/kromus/Bm25Config {
 	public fun <init> ()V
 	public fun <init> (FF)V
@@ -24,74 +40,111 @@ public final class io/github/kromus/Bm25Config {
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class io/github/kromus/ClusterConfig {
+public final class io/github/kromus/ByteBuffersKt {
+	public static final fun checksumOf ([BII)J
+	public static synthetic fun checksumOf$default ([BIIILjava/lang/Object;)J
+	public static final fun provenance (Lio/github/kromus/ByteReader;Ljava/lang/String;)Ljava/lang/String;
+	public static final fun provenance (Lio/github/kromus/ByteWriter;Ljava/lang/String;)V
+}
+
+public final class io/github/kromus/ByteReader {
+	public fun <init> ([BII)V
+	public synthetic fun <init> ([BIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun byte ()I
+	public final fun bytes ()[B
+	public final fun count (ILjava/lang/String;)I
+	public final fun enumValue (Ljava/util/List;Ljava/lang/String;)Ljava/lang/Object;
+	public final fun float ()F
+	public final fun getRemaining ()I
+	public final fun int ()I
+	public final fun level (I)I
+	public final fun long ()J
+	public final fun short ()I
+	public final fun shortCount (ILjava/lang/String;)I
+}
+
+public final class io/github/kromus/ByteWriter {
 	public fun <init> ()V
-	public fun <init> (IIFJILio/github/kromus/Quantization;)V
-	public synthetic fun <init> (IIFJILio/github/kromus/Quantization;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun component1 ()I
-	public final fun component2 ()I
-	public final fun component3 ()F
-	public final fun component4 ()J
-	public final fun component5 ()I
-	public final fun component6 ()Lio/github/kromus/Quantization;
-	public final fun copy (IIFJILio/github/kromus/Quantization;)Lio/github/kromus/ClusterConfig;
-	public static synthetic fun copy$default (Lio/github/kromus/ClusterConfig;IIFJILio/github/kromus/Quantization;ILjava/lang/Object;)Lio/github/kromus/ClusterConfig;
-	public fun equals (Ljava/lang/Object;)Z
-	public final fun getClusters ()I
-	public final fun getIterations ()I
-	public final fun getNprobe ()I
-	public final fun getQuantization ()Lio/github/kromus/Quantization;
-	public final fun getSeed ()J
-	public final fun getTargetRecall ()F
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
+	public fun <init> (I)V
+	public synthetic fun <init> (IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun byte (I)V
+	public final fun bytes ([B)V
+	public final fun float (F)V
+	public final fun getBytesWritten ()I
+	public final fun int (I)V
+	public final fun long (J)V
+	public final fun raw ([B)V
+	public final fun short (I)V
+	public final fun toByteArray ()[B
 }
 
-public final class io/github/kromus/ClusterEntry {
-	public fun <init> (Ljava/lang/Object;[FLjava/util/Map;)V
-	public synthetic fun <init> (Ljava/lang/Object;[FLjava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun getAttributes ()Ljava/util/Map;
-	public final fun getKey ()Ljava/lang/Object;
-	public final fun getVector ()[F
+public final class io/github/kromus/ContainerKt {
+	public static final fun deltaHeader (Lio/github/kromus/ByteReader;II)V
+	public static final fun deltaHeader (Lio/github/kromus/ByteWriter;II)V
+	public static final fun kindName (I)Ljava/lang/String;
 }
 
-public final class io/github/kromus/ClusterSearcher {
-	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
-	public static synthetic fun search$default (Lio/github/kromus/ClusterSearcher;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+public final class io/github/kromus/ContainerReader {
+	public fun <init> ([BIILjava/lang/String;)V
+	public final fun getProvenance ()Ljava/lang/String;
+	public final fun has (Ljava/lang/String;)Z
+	public final fun lengthOf (Ljava/lang/String;)I
+	public final fun offsetOf (Ljava/lang/String;)I
+	public final fun section (Ljava/lang/String;)Lio/github/kromus/ByteReader;
+	public final fun sectionBytes (Ljava/lang/String;)[B
 }
 
-public final class io/github/kromus/ClusteredIndex {
-	public static final field Companion Lio/github/kromus/ClusteredIndex$Companion;
+public final class io/github/kromus/ContainerWriter {
+	public fun <init> (IILjava/lang/String;)V
+	public final fun section (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun toByteArray ()[B
+}
+
+public final class io/github/kromus/FlatIndex : io/github/kromus/VectorSearch {
+	public static final field Companion Lio/github/kromus/FlatIndex$Companion;
 	public final fun attributesOf (Ljava/lang/Object;)Ljava/util/Map;
-	public final fun clusterSize (I)I
-	public final fun contains (Ljava/lang/Object;)Z
-	public final fun getClusters ()I
-	public final fun getConfig ()Lio/github/kromus/ClusterConfig;
-	public final fun getDimensions ()I
-	public final fun getEstimatedRecall ()F
-	public final fun getKeys ()Ljava/util/Set;
-	public final fun getMetric ()Lio/github/kromus/Metric;
-	public final fun getNprobe ()I
-	public final fun getSize ()I
-	public final fun probedClusters ([FI)[I
-	public static synthetic fun probedClusters$default (Lio/github/kromus/ClusteredIndex;[FIILjava/lang/Object;)[I
-	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
-	public static synthetic fun search$default (Lio/github/kromus/ClusteredIndex;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
-	public final fun searcher ()Lio/github/kromus/ClusterSearcher;
+	public fun contains (Ljava/lang/Object;)Z
+	public fun getDimensions ()I
+	public fun getKeys ()Ljava/util/Set;
+	public fun getMetric ()Lio/github/kromus/Metric;
+	public final fun getQuantization ()Lio/github/kromus/Quantization;
+	public fun getSize ()I
+	public fun searcher ()Lio/github/kromus/FlatSearcher;
+	public synthetic fun searcher ()Lio/github/kromus/Searcher;
 }
 
-public final class io/github/kromus/ClusteredIndex$Companion {
-	public final fun build (ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/ClusterConfig;)Lio/github/kromus/ClusteredIndex;
-	public static synthetic fun build$default (Lio/github/kromus/ClusteredIndex$Companion;ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/ClusterConfig;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
+public final class io/github/kromus/FlatIndex$Companion {
+	public final fun build (ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/Quantization;Lio/github/kromus/VectorStoreFactory;)Lio/github/kromus/FlatIndex;
+	public static synthetic fun build$default (Lio/github/kromus/FlatIndex$Companion;ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/Quantization;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/FlatIndex;
 }
 
-public final class io/github/kromus/ClusteredPersistenceKt {
-	public static final fun decodeClusteredIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/ClusteredIndex;
-	public static synthetic fun decodeClusteredIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
-	public static final fun encodeToByteArray (Lio/github/kromus/ClusteredIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
-	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/ClusteredIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
-	public static final fun viewClusteredIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;)Lio/github/kromus/ClusteredIndex;
-	public static synthetic fun viewClusteredIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/ClusteredIndex;
+public final class io/github/kromus/FlatPersistenceKt {
+	public static final fun decodeFlatIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;)Lio/github/kromus/FlatIndex;
+	public static synthetic fun decodeFlatIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/FlatIndex;
+	public static final fun encodeToByteArray (Lio/github/kromus/FlatIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
+	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/FlatIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+	public static final fun viewFlatIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;)Lio/github/kromus/FlatIndex;
+	public static synthetic fun viewFlatIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/FlatIndex;
+}
+
+public final class io/github/kromus/FlatSearcher : io/github/kromus/Searcher {
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
+}
+
+public final class io/github/kromus/Float32VectorStore : io/github/kromus/VectorStore {
+	public fun <init> (ILio/github/kromus/Metric;)V
+	public fun add ([F)I
+	public fun distanceBetween (II)F
+	public fun distanceToQuery ([FI)F
+	public fun getDimensions ()I
+	public fun getMetric ()Lio/github/kromus/Metric;
+	public fun getSize ()I
+	public fun getStrideBytes ()I
+	public final fun load ([F)I
+	public fun readVector (Lio/github/kromus/ByteReader;)V
+	public fun reconstruct (I)[F
+	public final fun vectorAt (I)[F
+	public fun writeVector (ILio/github/kromus/ByteWriter;)V
 }
 
 public final class io/github/kromus/HnswConfig {
@@ -170,6 +223,106 @@ public final class io/github/kromus/IncrementalPersistenceKt {
 	public static final fun encodeDelta (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;)[B
 }
 
+public final class io/github/kromus/Int8VectorStore : io/github/kromus/VectorStore {
+	public fun <init> (ILio/github/kromus/Metric;)V
+	public fun add ([F)I
+	public final fun codeAt (I)[B
+	public fun distanceBetween (II)F
+	public fun distanceToQuery ([FI)F
+	public fun getDimensions ()I
+	public fun getMetric ()Lio/github/kromus/Metric;
+	public fun getSize ()I
+	public fun getStrideBytes ()I
+	public final fun load ([BF)I
+	public fun readVector (Lio/github/kromus/ByteReader;)V
+	public fun reconstruct (I)[F
+	public final fun scaleAt (I)F
+	public fun writeVector (ILio/github/kromus/ByteWriter;)V
+}
+
+public final class io/github/kromus/IvfConfig {
+	public fun <init> ()V
+	public fun <init> (IIFILio/github/kromus/Routing;JILio/github/kromus/Quantization;)V
+	public synthetic fun <init> (IIFILio/github/kromus/Routing;JILio/github/kromus/Quantization;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()F
+	public final fun component4 ()I
+	public final fun component5 ()Lio/github/kromus/Routing;
+	public final fun component6 ()J
+	public final fun component7 ()I
+	public final fun component8 ()Lio/github/kromus/Quantization;
+	public final fun copy (IIFILio/github/kromus/Routing;JILio/github/kromus/Quantization;)Lio/github/kromus/IvfConfig;
+	public static synthetic fun copy$default (Lio/github/kromus/IvfConfig;IIFILio/github/kromus/Routing;JILio/github/kromus/Quantization;ILjava/lang/Object;)Lio/github/kromus/IvfConfig;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAssignments ()I
+	public final fun getClusters ()I
+	public final fun getIterations ()I
+	public final fun getNprobe ()I
+	public final fun getQuantization ()Lio/github/kromus/Quantization;
+	public final fun getRouting ()Lio/github/kromus/Routing;
+	public final fun getSeed ()J
+	public final fun getTargetRecall ()F
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/github/kromus/IvfEntry {
+	public fun <init> (Ljava/lang/Object;[FLjava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/Object;[FLjava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getKey ()Ljava/lang/Object;
+	public final fun getVector ()[F
+}
+
+public final class io/github/kromus/IvfIndex : io/github/kromus/VectorSearch {
+	public static final field Companion Lio/github/kromus/IvfIndex$Companion;
+	public final fun attributesOf (Ljava/lang/Object;)Ljava/util/Map;
+	public final fun clusterSize (I)I
+	public fun contains (Ljava/lang/Object;)Z
+	public final fun getClusters ()I
+	public final fun getConfig ()Lio/github/kromus/IvfConfig;
+	public fun getDimensions ()I
+	public final fun getEstimatedRecall ()F
+	public fun getKeys ()Ljava/util/Set;
+	public fun getMetric ()Lio/github/kromus/Metric;
+	public final fun getNprobe ()I
+	public fun getSize ()I
+	public final fun getStoredVectors ()I
+	public final fun probedClusters ([FI)[I
+	public static synthetic fun probedClusters$default (Lio/github/kromus/IvfIndex;[FIILjava/lang/Object;)[I
+	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/IvfIndex;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+	public fun searcher ()Lio/github/kromus/IvfSearcher;
+	public synthetic fun searcher ()Lio/github/kromus/Searcher;
+}
+
+public final class io/github/kromus/IvfIndex$Companion {
+	public final fun build (ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/IvfConfig;Lio/github/kromus/VectorStoreFactory;)Lio/github/kromus/IvfIndex;
+	public static synthetic fun build$default (Lio/github/kromus/IvfIndex$Companion;ILjava/util/List;Lio/github/kromus/Metric;Lio/github/kromus/IvfConfig;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/IvfIndex;
+}
+
+public final class io/github/kromus/IvfPersistenceKt {
+	public static final fun decodeIvfIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;)Lio/github/kromus/IvfIndex;
+	public static synthetic fun decodeIvfIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/IvfIndex;
+	public static final fun encodeToByteArray (Lio/github/kromus/IvfIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
+	public static synthetic fun encodeToByteArray$default (Lio/github/kromus/IvfIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)[B
+	public static final fun viewIvfIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;)Lio/github/kromus/IvfIndex;
+	public static synthetic fun viewIvfIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/VectorBlocks;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/IvfIndex;
+}
+
+public final class io/github/kromus/IvfPresets {
+	public static final field INSTANCE Lio/github/kromus/IvfPresets;
+	public final fun spann (IIIFLio/github/kromus/Quantization;)Lio/github/kromus/IvfConfig;
+	public static synthetic fun spann$default (Lio/github/kromus/IvfPresets;IIIFLio/github/kromus/Quantization;ILjava/lang/Object;)Lio/github/kromus/IvfConfig;
+}
+
+public final class io/github/kromus/IvfSearcher : io/github/kromus/Searcher {
+	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/IvfSearcher;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
 public abstract interface class io/github/kromus/KeyCodec {
 	public static final field Companion Lio/github/kromus/KeyCodec$Companion;
 	public abstract fun decode ([B)Ljava/lang/Object;
@@ -199,8 +352,8 @@ public final class io/github/kromus/PersistenceKt {
 	public static synthetic fun decodeHybridIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/HybridIndex;
 	public static final fun decodeTextIndex ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;)Lio/github/kromus/TextIndex;
 	public static synthetic fun decodeTextIndex$default ([BLio/github/kromus/KeyCodec;Lio/github/kromus/Analyzer;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/TextIndex;
-	public static final fun decodeVectorIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;)Lio/github/kromus/VectorIndex;
-	public static synthetic fun decodeVectorIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;ILjava/lang/Object;)Lio/github/kromus/VectorIndex;
+	public static final fun decodeVectorIndex ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;)Lio/github/kromus/VectorIndex;
+	public static synthetic fun decodeVectorIndex$default ([BLio/github/kromus/KeyCodec;Ljava/lang/String;Lio/github/kromus/VectorStoreFactory;ILjava/lang/Object;)Lio/github/kromus/VectorIndex;
 	public static final fun encodeToByteArray (Lio/github/kromus/HybridIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
 	public static final fun encodeToByteArray (Lio/github/kromus/TextIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
 	public static final fun encodeToByteArray (Lio/github/kromus/VectorIndex;Lio/github/kromus/KeyCodec;Ljava/lang/String;)[B
@@ -224,6 +377,15 @@ public final class io/github/kromus/RerankKt {
 	public static synthetic fun rerank$default ([FLjava/util/List;ILio/github/kromus/Metric;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 }
 
+public final class io/github/kromus/Routing : java/lang/Enum {
+	public static final field Auto Lio/github/kromus/Routing;
+	public static final field Graph Lio/github/kromus/Routing;
+	public static final field Linear Lio/github/kromus/Routing;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/github/kromus/Routing;
+	public static fun values ()[Lio/github/kromus/Routing;
+}
+
 public final class io/github/kromus/Rrf {
 	public static final field DEFAULT_K I
 	public static final field INSTANCE Lio/github/kromus/Rrf;
@@ -244,6 +406,15 @@ public final class io/github/kromus/SearchResult {
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class io/github/kromus/Searcher {
+	public abstract fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/Searcher;[FILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class io/github/kromus/Searcher$DefaultImpls {
+	public static synthetic fun search$default (Lio/github/kromus/Searcher;[FILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
 public abstract interface class io/github/kromus/Stemmer {
 	public static final field Companion Lio/github/kromus/Stemmer$Companion;
 	public abstract fun stem (Ljava/lang/String;)Ljava/lang/String;
@@ -256,6 +427,17 @@ public final class io/github/kromus/Stemmer$Companion {
 public final class io/github/kromus/Stopwords {
 	public static final field INSTANCE Lio/github/kromus/Stopwords;
 	public final fun getEnglish ()Ljava/util/Set;
+}
+
+public final class io/github/kromus/StringPoolReader {
+	public fun <init> (Lio/github/kromus/ByteReader;)V
+	public final fun get (I)Ljava/lang/String;
+}
+
+public final class io/github/kromus/StringPoolWriter {
+	public fun <init> ()V
+	public final fun idOf (Ljava/lang/String;)I
+	public final fun writeTo (Lio/github/kromus/ByteWriter;)V
 }
 
 public final class io/github/kromus/TextIndex {
@@ -288,33 +470,70 @@ public final class io/github/kromus/VectorBlocks$DefaultImpls {
 	public static fun close (Lio/github/kromus/VectorBlocks;)V
 }
 
-public final class io/github/kromus/VectorIndex {
-	public fun <init> (ILio/github/kromus/Metric;Lio/github/kromus/HnswConfig;)V
-	public synthetic fun <init> (ILio/github/kromus/Metric;Lio/github/kromus/HnswConfig;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public synthetic fun <init> (ILio/github/kromus/Metric;Lio/github/kromus/HnswConfig;Lio/github/kromus/Hnsw;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+public final class io/github/kromus/VectorIndex : io/github/kromus/VectorSearch {
+	public synthetic fun <init> (ILio/github/kromus/Metric;Lio/github/kromus/HnswConfig;Lio/github/kromus/Hnsw;Lio/github/kromus/VectorStoreFactory;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (ILio/github/kromus/Metric;Lio/github/kromus/HnswConfig;Lio/github/kromus/VectorStoreFactory;)V
+	public synthetic fun <init> (ILio/github/kromus/Metric;Lio/github/kromus/HnswConfig;Lio/github/kromus/VectorStoreFactory;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun add (Ljava/lang/Object;[FLjava/util/Map;)V
 	public static synthetic fun add$default (Lio/github/kromus/VectorIndex;Ljava/lang/Object;[FLjava/util/Map;ILjava/lang/Object;)V
 	public final fun clear ()V
 	public final fun compact ()I
-	public final fun contains (Ljava/lang/Object;)Z
+	public fun contains (Ljava/lang/Object;)Z
 	public final fun getConfig ()Lio/github/kromus/HnswConfig;
-	public final fun getDimensions ()I
+	public fun getDimensions ()I
 	public final fun getDirtyNodes ()I
-	public final fun getKeys ()Ljava/util/Set;
-	public final fun getMetric ()Lio/github/kromus/Metric;
+	public fun getKeys ()Ljava/util/Set;
+	public fun getMetric ()Lio/github/kromus/Metric;
 	public final fun getNeedsFullSnapshot ()Z
-	public final fun getSize ()I
+	public fun getSize ()I
 	public final fun getTombstones ()I
 	public final fun remove (Ljava/lang/Object;)Z
 	public final fun search ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/VectorIndex;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
-	public final fun searcher ()Lio/github/kromus/VectorSearcher;
+	public synthetic fun searcher ()Lio/github/kromus/Searcher;
+	public fun searcher ()Lio/github/kromus/VectorSearcher;
 	public final fun updateAttributes (Ljava/lang/Object;Ljava/util/Map;)Z
 	public final fun vectorOf (Ljava/lang/Object;)[F
 }
 
-public final class io/github/kromus/VectorSearcher {
+public abstract interface class io/github/kromus/VectorSearch {
+	public abstract fun contains (Ljava/lang/Object;)Z
+	public abstract fun getDimensions ()I
+	public abstract fun getKeys ()Ljava/util/Set;
+	public abstract fun getMetric ()Lio/github/kromus/Metric;
+	public abstract fun getSize ()I
+	public abstract fun searcher ()Lio/github/kromus/Searcher;
+}
+
+public final class io/github/kromus/VectorSearchKt {
+	public static final fun search (Lio/github/kromus/VectorSearch;[FILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/VectorSearch;[FILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public final class io/github/kromus/VectorSearcher : io/github/kromus/Searcher {
 	public final fun search ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/VectorSearcher;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
+}
+
+public abstract interface class io/github/kromus/VectorStore {
+	public abstract fun add ([F)I
+	public abstract fun distanceBetween (II)F
+	public abstract fun distanceToQuery ([FI)F
+	public abstract fun getDimensions ()I
+	public abstract fun getMetric ()Lio/github/kromus/Metric;
+	public abstract fun getSize ()I
+	public abstract fun getStrideBytes ()I
+	public abstract fun readVector (Lio/github/kromus/ByteReader;)V
+	public abstract fun reconstruct (I)[F
+	public abstract fun writeVector (ILio/github/kromus/ByteWriter;)V
+}
+
+public abstract interface class io/github/kromus/VectorStoreFactory {
+	public abstract fun create (ILio/github/kromus/Metric;)Lio/github/kromus/VectorStore;
+}
+
+public final class io/github/kromus/VectorStoreKt {
+	public static final fun metricDistance ([F[FLio/github/kromus/Metric;)F
 }
 

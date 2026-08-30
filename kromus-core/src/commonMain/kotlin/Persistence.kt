@@ -115,15 +115,7 @@ public fun <K> VectorIndex<K>.encodeToByteArray(
     // One stride per entry, so a reader can address node id's vector arithmetically.
     c.section(S_VECTORS) {
         for (id in 0 until n) {
-            when (store) {
-                is Float32VectorStore -> for (x in store.vectorAt(id)) float(x)
-                is Int8VectorStore -> {
-                    for (b in store.codeAt(id)) byte(b.toInt())
-                    float(store.scaleAt(id))
-                }
-                is BinaryVectorStore -> for (word in store.codeAt(id)) long(word)
-                else -> error("unknown vector store")
-            }
+            store.writeVector(id, this)
         }
     }
 
@@ -161,12 +153,15 @@ public fun <K> VectorIndex<K>.encodeToByteArray(
  * @param expect refuse the index unless it recorded this provenance. An index is only meaningful
  *   together with the model that produced its vectors; pairing it with another does not fail, it
  *   quietly returns wrong results, which is why this is worth stating.
+ * @param store the quantizer the index was built with, if it was one of your own. Nothing in the
+ *   bytes names it, so reading with the wrong one is not detected — it decodes and returns nonsense.
  * @throws KromusFormatException if [bytes] are not a vector index this build can read.
  */
 public fun <K> decodeVectorIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     expect: String? = null,
+    store: VectorStoreFactory? = null,
 ): VectorIndex<K> {
     val c = ContainerReader(bytes, KIND_VECTOR, VECTOR_FORMAT, expect)
 
@@ -194,7 +189,10 @@ public fun <K> decodeVectorIndex(
 
     // Every id-indexed section has to describe the same node count, which the table makes checkable
     // before a single record is read.
-    val stride = vectorBytes(dimensions, config.quantization)
+    // A custom store defines its own stride, so the store is built before the length is checked
+    // against it — the check is still worth making, it just cannot assume the built-in layout.
+    val vectorStore = store?.create(dimensions, metric) ?: Hnsw.newStore(dimensions, metric, config.quantization)
+    val stride = vectorStore.strideBytes
     if (c.lengthOf(S_VECTORS).toLong() != n.toLong() * stride) {
         throw KromusFormatException(
             "corrupt kromus index: the vector section is ${c.lengthOf(S_VECTORS)} byte(s), " +
@@ -234,15 +232,9 @@ public fun <K> decodeVectorIndex(
         )
     }
 
-    val store = Hnsw.newStore(dimensions, metric, config.quantization)
     val vectors = c.section(S_VECTORS)
     repeat(n) {
-        when (store) {
-            is Float32VectorStore -> store.load(FloatArray(dimensions) { vectors.float() })
-            is Int8VectorStore -> store.load(ByteArray(dimensions) { vectors.byte().toByte() }, vectors.float())
-            is BinaryVectorStore -> store.load(LongArray((dimensions + 63) ushr 6) { vectors.long() })
-            else -> error("unknown vector store")
-        }
+        vectorStore.readVector(vectors)
     }
 
     val entries = c.section(S_ENTRIES)
@@ -268,8 +260,8 @@ public fun <K> decodeVectorIndex(
         }
     }
 
-    val hnsw = Hnsw.restore(metric, config, store, levels, neighbors, deleted, entryPoint, topLayer)
-    val index = VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n)
+    val hnsw = Hnsw.restore(metric, config, vectorStore, levels, neighbors, deleted, entryPoint, topLayer)
+    val index = VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n, store)
     // A freshly decoded index is a checkpoint of exactly these bytes, so deltas can chain onto it.
     index.checkpoint(checksumOf(bytes))
     return index

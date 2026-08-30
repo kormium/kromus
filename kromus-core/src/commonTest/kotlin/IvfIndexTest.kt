@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class ClusteredIndexTest {
+class IvfIndexTest {
 
     private val dim = 32
 
@@ -41,7 +41,7 @@ class ClusteredIndexTest {
             .take(k)
     }
 
-    private fun entries(data: List<FloatArray>) = data.mapIndexed { i, v -> ClusterEntry(i, v) }
+    private fun entries(data: List<FloatArray>) = data.mapIndexed { i, v -> IvfEntry(i, v) }
 
     @Test
     fun probingEveryClusterMatchesExactSearch() {
@@ -49,7 +49,7 @@ class ClusteredIndexTest {
         // no licence to be approximate. Any disagreement here is a bug in the distance path, not a
         // recall trade.
         val data = corpus(400, 1)
-        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 16))
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 16))
 
         val rng = Random(2)
         repeat(20) {
@@ -65,7 +65,7 @@ class ClusteredIndexTest {
     @Test
     fun recallRisesWithNprobe() {
         val data = corpus(1200, 3, clusters = 20)
-        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 34))
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 34))
 
         val rng = Random(4)
         val queries = List(40) { FloatArray(dim) { rng.nextFloat() * 2f - 1f } }
@@ -96,7 +96,7 @@ class ClusteredIndexTest {
         // this run and on every other target.
         val data = corpus(300, 5)
 
-        fun build() = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 12))
+        fun build() = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 12))
         val a = build()
         val b = build()
 
@@ -109,7 +109,7 @@ class ClusteredIndexTest {
     fun clustersAreContiguousAndCoverEveryEntry() {
         // The property the whole design rests on: a cluster is a run, not a scatter.
         val data = corpus(500, 6)
-        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 20))
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 20))
 
         assertEquals(0, index.clusterStarts.first())
         assertEquals(index.size, index.clusterStarts.last())
@@ -122,10 +122,10 @@ class ClusteredIndexTest {
     @Test
     fun filtersApplyToCandidates() {
         val data = corpus(300, 7)
-        val index = ClusteredIndex.build(
+        val index = IvfIndex.build(
             dim,
-            data.mapIndexed { i, v -> ClusterEntry(i, v, mapOf("even" to "${i % 2 == 0}")) },
-            config = ClusterConfig(clusters = 12),
+            data.mapIndexed { i, v -> IvfEntry(i, v, mapOf("even" to "${i % 2 == 0}")) },
+            config = IvfConfig(clusters = 12),
         )
         val hits = index.search(data[0], 10, nprobe = 12, filter = { it["even"] == "true" })
         assertTrue(hits.isNotEmpty())
@@ -135,14 +135,14 @@ class ClusteredIndexTest {
     @Test
     fun handlesCorporaSmallerThanTheClusterCount() {
         val data = corpus(3, 8)
-        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 50))
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 50))
         assertEquals(3, index.size)
         assertEquals(exact(data, data[1], 3), index.search(data[1], 3, nprobe = 50).map { it.key })
     }
 
     @Test
     fun anEmptyIndexSearchesToNothing() {
-        val index = ClusteredIndex.build<Int>(dim, emptyList())
+        val index = IvfIndex.build<Int>(dim, emptyList())
         assertEquals(0, index.size)
         assertTrue(index.search(FloatArray(dim), 5).isEmpty())
     }
@@ -153,7 +153,7 @@ class ClusteredIndexTest {
         val data = corpus(200, 9)
         val graph = VectorIndex<Int>(dim, Metric.Cosine)
         data.forEachIndexed { i, v -> graph.add(i, v) }
-        val clustered = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 10))
+        val clustered = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 10))
 
         val q = data[3]
         val fromGraph = graph.search(q, 5).associate { it.key to it.score }
@@ -169,13 +169,13 @@ class ClusteredIndexTest {
     @Test
     fun aRoundTripReproducesEverything() {
         val data = corpus(400, 21)
-        val index = ClusteredIndex.build(
+        val index = IvfIndex.build(
             dim,
-            data.mapIndexed { i, v -> ClusterEntry(i, v, mapOf("bucket" to "${i % 3}")) },
-            config = ClusterConfig(clusters = 16, nprobe = 5),
+            data.mapIndexed { i, v -> IvfEntry(i, v, mapOf("bucket" to "${i % 3}")) },
+            config = IvfConfig(clusters = 16, nprobe = 5),
         )
         val blob = index.encodeToByteArray(KeyCodec.int)
-        val reloaded = decodeClusteredIndex(blob, KeyCodec.int)
+        val reloaded = decodeIvfIndex(blob, KeyCodec.int)
 
         assertEquals(index.size, reloaded.size)
         assertContentEquals(index.keys.toList(), reloaded.keys.toList())
@@ -199,23 +199,23 @@ class ClusteredIndexTest {
         // either — and an index could no longer be compared to a cached copy by digest.
         val data = corpus(250, 23)
 
-        fun encode() = ClusteredIndex
-            .build(dim, entries(data), config = ClusterConfig(clusters = 12))
+        fun encode() = IvfIndex
+            .build(dim, entries(data), config = IvfConfig(clusters = 12))
             .encodeToByteArray(KeyCodec.int)
         assertContentEquals(encode(), encode())
 
         // And across a reload, which is where the guarantee is easiest to lose.
         val first = encode()
-        assertContentEquals(first, decodeClusteredIndex(first, KeyCodec.int).encodeToByteArray(KeyCodec.int))
+        assertContentEquals(first, decodeIvfIndex(first, KeyCodec.int).encodeToByteArray(KeyCodec.int))
     }
 
     @Test
     fun quantizedClustersRoundTripToo() {
         val data = corpus(300, 24)
         for (q in listOf(Quantization.Int8, Quantization.Binary)) {
-            val config = ClusterConfig(clusters = 12, quantization = q)
-            val index = ClusteredIndex.build(dim, entries(data), config = config)
-            val reloaded = decodeClusteredIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+            val config = IvfConfig(clusters = 12, quantization = q)
+            val index = IvfIndex.build(dim, entries(data), config = config)
+            val reloaded = decodeIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
             val probe = data[5]
             assertEquals(
                 index.search(probe, 8, nprobe = 12).map { it.key },
@@ -230,8 +230,8 @@ class ClusteredIndexTest {
         // The point of measuring rather than defaulting: how many clusters a query must open is a
         // property of the data, and the two ends of that are far apart. A blind number is right for
         // one and quietly wrong for the other.
-        val tight = ClusteredIndex.build(dim, entries(corpus(1500, 41, clusters = 15)))
-        val diffuse = ClusteredIndex.build(dim, entries(scattered(1500, 42)))
+        val tight = IvfIndex.build(dim, entries(corpus(1500, 41, clusters = 15)))
+        val diffuse = IvfIndex.build(dim, entries(scattered(1500, 42)))
 
         assertTrue(
             tight.nprobe < diffuse.nprobe,
@@ -246,7 +246,7 @@ class ClusteredIndexTest {
         // The measurement predicts recall on a sample; this checks the prediction against queries it
         // never saw, because a self-fulfilling estimate would be worse than none.
         val data = scattered(1200, 43)
-        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(targetRecall = 0.9f))
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(targetRecall = 0.9f))
 
         val rng = Random(44)
         val queries = List(40) { FloatArray(dim) { rng.nextFloat() * 2f - 1f } }
@@ -261,15 +261,15 @@ class ClusteredIndexTest {
 
     @Test
     fun anExplicitProbeCountIsLeftAlone() {
-        val index = ClusteredIndex.build(dim, entries(corpus(400, 45)), config = ClusterConfig(nprobe = 3))
+        val index = IvfIndex.build(dim, entries(corpus(400, 45)), config = IvfConfig(nprobe = 3))
         assertEquals(3, index.nprobe)
         assertTrue(index.estimatedRecall.isNaN(), "nothing was measured, so there is nothing to report")
     }
 
     @Test
     fun theMeasuredProbeCountSurvivesARoundTrip() {
-        val index = ClusteredIndex.build(dim, entries(scattered(600, 46)))
-        val reloaded = decodeClusteredIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+        val index = IvfIndex.build(dim, entries(scattered(600, 46)))
+        val reloaded = decodeIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
         assertEquals(index.nprobe, reloaded.nprobe)
         assertEquals(index.estimatedRecall, reloaded.estimatedRecall)
     }
@@ -289,15 +289,15 @@ class ClusteredIndexTest {
         for (quantization in listOf(Quantization.None, Quantization.Int8)) {
             for (metric in Metric.entries) {
                 val data = corpus(500, 51)
-                val index = ClusteredIndex.build(
+                val index = IvfIndex.build(
                     dim,
-                    data.mapIndexed { i, v -> ClusterEntry(i, v, mapOf("odd" to "${i % 2 == 1}")) },
+                    data.mapIndexed { i, v -> IvfEntry(i, v, mapOf("odd" to "${i % 2 == 1}")) },
                     metric = metric,
-                    config = ClusterConfig(clusters = 16, nprobe = 4, quantization = quantization),
+                    config = IvfConfig(clusters = 16, nprobe = 4, quantization = quantization),
                 )
                 val blob = index.encodeToByteArray(KeyCodec.int)
-                val resident = decodeClusteredIndex(blob, KeyCodec.int)
-                val streamed = viewClusteredIndex(blob, KeyCodec.int)
+                val resident = decodeIvfIndex(blob, KeyCodec.int)
+                val streamed = viewIvfIndex(blob, KeyCodec.int)
 
                 val rng = Random(52)
                 repeat(15) {
@@ -318,8 +318,8 @@ class ClusteredIndexTest {
     @Test
     fun aStreamedSearcherReusesItsBufferAcrossQueries() {
         val data = corpus(400, 53)
-        val index = ClusteredIndex.build(dim, entries(data), config = ClusterConfig(clusters = 12, nprobe = 3))
-        val streamed = viewClusteredIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 12, nprobe = 3))
+        val streamed = viewIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
 
         val searcher = streamed.searcher()
         val q = data[9]
@@ -332,15 +332,151 @@ class ClusteredIndexTest {
     @Test
     fun binaryCannotBeStreamedAndSaysSo() {
         val data = corpus(200, 54)
-        val index = ClusteredIndex.build(
+        val index = IvfIndex.build(
             dim,
             entries(data),
-            config = ClusterConfig(clusters = 8, quantization = Quantization.Binary),
+            config = IvfConfig(clusters = 8, quantization = Quantization.Binary),
         )
         val blob = index.encodeToByteArray(KeyCodec.int)
-        val failure = assertFailsWith<KromusFormatException> { viewClusteredIndex(blob, KeyCodec.int) }
+        val failure = assertFailsWith<KromusFormatException> { viewIvfIndex(blob, KeyCodec.int) }
         assertTrue("Binary" in failure.message!!, failure.message!!)
         // ...and loads normally, which is the whole reason refusing is acceptable.
-        assertEquals(200, decodeClusteredIndex(blob, KeyCodec.int).size)
+        assertEquals(200, decodeIvfIndex(blob, KeyCodec.int).size)
+    }
+
+    @Test
+    fun redundantAssignmentRecoversBoundaryNeighbours() {
+        // The failure a partitioned index has and a graph does not: a neighbour just across a boundary
+        // is missed by a query on the other side. Writing a vector into its nearest few lists makes the
+        // boundary stop existing for it, which is exactly what this should show at nprobe = 1.
+        val data = scattered(1500, 61)
+        val queries = List(50) { i -> data[i * 7 % data.size] }
+        val truth = queries.map { exact(data, it, 10).toSet() }
+
+        fun recallWith(assignments: Int): Double {
+            val index = IvfIndex.build(
+                dim,
+                entries(data),
+                config = IvfConfig(clusters = 40, nprobe = 1, assignments = assignments),
+            )
+            var hits = 0
+            queries.forEachIndexed { i, q -> hits += index.search(q, 10).count { it.key in truth[i] } }
+            return hits / (10.0 * queries.size)
+        }
+
+        val single = recallWith(1)
+        val triple = recallWith(3)
+        assertTrue(triple > single, "assignments=3 should beat assignments=1 at nprobe=1: $single -> $triple")
+    }
+
+    @Test
+    fun aDuplicatedEntryIsReportedOnce() {
+        val data = scattered(400, 62)
+        val index = IvfIndex.build(
+            dim,
+            entries(data),
+            config = IvfConfig(clusters = 10, nprobe = 10, assignments = 4),
+        )
+        assertTrue(index.storedVectors > index.size, "assignments=4 should store copies")
+        assertEquals(400, index.size, "size counts entries, not copies")
+
+        val hits = index.search(data[3], 20)
+        assertEquals(hits.map { it.key }.distinct(), hits.map { it.key }, "an entry met twice must appear once")
+        assertEquals(20, hits.size)
+    }
+
+    @Test
+    fun redundantAssignmentSurvivesARoundTripAndStreaming() {
+        val data = scattered(500, 63)
+        val index = IvfIndex.build(
+            dim,
+            entries(data),
+            config = IvfConfig(clusters = 16, nprobe = 3, assignments = 2),
+        )
+        val blob = index.encodeToByteArray(KeyCodec.int)
+        val reloaded = decodeIvfIndex(blob, KeyCodec.int)
+        val streamed = viewIvfIndex(blob, KeyCodec.int)
+
+        assertEquals(index.size, reloaded.size)
+        assertEquals(index.storedVectors, reloaded.storedVectors)
+        val q = data[11]
+        val expected = index.search(q, 10).map { it.key to it.score }
+        assertEquals(expected, reloaded.search(q, 10).map { it.key to it.score })
+        assertEquals(expected, streamed.search(q, 10).map { it.key to it.score })
+    }
+
+    @Test
+    fun graphRoutingFindsThePracticallySameListsAsScanningThemAll() {
+        // The router replaces an exact scan of the centroids with an approximate walk over them, so it
+        // adds a second place a neighbour can be lost. Worth having only if what it returns is nearly
+        // what the scan would have.
+        val data = scattered(3000, 71)
+        val linear = IvfIndex.build(
+            dim,
+            entries(data),
+            config = IvfConfig(clusters = 64, nprobe = 8, routing = Routing.Linear),
+        )
+        val graph = IvfIndex.build(
+            dim,
+            entries(data),
+            config = IvfConfig(clusters = 64, nprobe = 8, routing = Routing.Graph),
+        )
+
+        val rng = Random(72)
+        var agreed = 0
+        var total = 0
+        repeat(40) {
+            val q = FloatArray(dim) { rng.nextFloat() * 2f - 1f }
+            val a = linear.search(q, 10).map { it.key }.toSet()
+            val b = graph.search(q, 10).map { it.key }
+            agreed += b.count { it in a }
+            total += 10
+        }
+        val agreement = agreed.toDouble() / total
+        assertTrue(agreement > 0.9, "graph routing should nearly match an exact centroid scan, got $agreement")
+    }
+
+    @Test
+    fun routingChoiceSurvivesARoundTrip() {
+        val data = scattered(800, 73)
+        val index = IvfIndex.build(
+            dim,
+            entries(data),
+            config = IvfConfig(clusters = 32, nprobe = 4, routing = Routing.Graph),
+        )
+        val reloaded = decodeIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+        assertEquals(Routing.Graph, reloaded.config.routing)
+        val q = data[5]
+        assertEquals(index.search(q, 10).map { it.key }, reloaded.search(q, 10).map { it.key })
+    }
+
+    @Test
+    fun autoRoutingScansWhileTheListsAreFew() {
+        // Auto has to prefer the exact scan while it is cheap, or it trades accuracy for nothing.
+        val index = IvfIndex.build(dim, entries(scattered(600, 74)), config = IvfConfig(clusters = 24))
+        assertEquals(Routing.Auto, index.config.routing)
+        val reloaded = decodeIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
+        val q = scattered(1, 75).first()
+        assertEquals(index.search(q, 10).map { it.key }, reloaded.search(q, 10).map { it.key })
+    }
+
+    @Test
+    fun theSpannPresetProducesSmallListsAndFindsItsNeighbours() {
+        val data = scattered(4000, 81)
+        val config = IvfPresets.spann(entryCount = data.size, postingSize = 100)
+        val index = IvfIndex.build(dim, entries(data), config = config)
+
+        assertEquals(40, index.clusters, "postingSize should set the list count")
+        assertEquals(Routing.Graph, index.config.routing)
+        assertTrue(index.storedVectors > index.size, "redundant assignment should store copies")
+
+        val queries = List(30) { i -> data[i * 11 % data.size] }
+        var hits = 0
+        queries.forEach { q ->
+            val truth = exact(data, q, 10).toSet()
+            hits += index.search(q, 10).count { it.key in truth }
+        }
+        val recall = hits / (10.0 * queries.size)
+        assertTrue(recall > 0.8, "the SPANN preset should find most neighbours, got $recall")
     }
 }

@@ -8,7 +8,7 @@ package io.github.kromus
 // That is the property a graph index cannot have — its traversal goes wherever the data says, and no
 // arrangement of the file changes that.
 
-private const val CLUSTERED_FORMAT: Int = 1
+private const val IVF_FORMAT: Int = 1
 
 private const val S_CONFIG = "CNFG"
 private const val S_CENTROIDS = "CNTR"
@@ -19,16 +19,16 @@ private const val S_ENTRIES = "ENTR"
 /**
  * Serializes this clustered index.
  *
- * @param provenance what produced it — see the `expect` parameter of [decodeClusteredIndex].
+ * @param provenance what produced it — see the `expect` parameter of [decodeIvfIndex].
  */
-public fun <K> ClusteredIndex<K>.encodeToByteArray(
+public fun <K> IvfIndex<K>.encodeToByteArray(
     keyCodec: KeyCodec<K>,
     provenance: String? = null,
 ): ByteArray {
     // Bound outside the section lambdas: inside them the receiver is a ByteWriter, and `size` there
     // means something else entirely.
-    val entryCount = size
-    val c = ContainerWriter(KIND_CLUSTERED, CLUSTERED_FORMAT, provenance)
+    val stored = storedVectors
+    val c = ContainerWriter(KIND_IVF, IVF_FORMAT, provenance)
 
     c.section(S_CONFIG) {
         int(dimensions)
@@ -36,11 +36,14 @@ public fun <K> ClusteredIndex<K>.encodeToByteArray(
         int(config.clusters)
         int(config.nprobe)
         float(config.targetRecall)
+        int(config.assignments)
+        byte(config.routing.ordinal)
         long(config.seed)
         int(config.iterations)
         byte(config.quantization.ordinal)
-        int(entryCount)
+        int(stored)
         int(clusterCount)
+        int(size)
         // The effective probe count and what it was measured to recover. Stored rather than
         // recomputed: measuring needs the corpus, and a loaded index is meant to skip that work.
         int(nprobe)
@@ -53,23 +56,15 @@ public fun <K> ClusteredIndex<K>.encodeToByteArray(
     c.section(S_CLUSTERS) { for (start in clusterStarts) int(start) }
 
     c.section(S_VECTORS) {
-        for (id in 0 until entryCount) {
-            when (store) {
-                is Float32VectorStore -> for (x in store.vectorAt(id)) float(x)
-                is Int8VectorStore -> {
-                    for (b in store.codeAt(id)) byte(b.toInt())
-                    float(store.scaleAt(id))
-                }
-                is BinaryVectorStore -> for (word in store.codeAt(id)) long(word)
-                else -> error("unknown vector store")
-            }
+        for (id in 0 until stored) {
+            store.writeVector(id, this)
         }
     }
 
     c.section(S_ENTRIES) {
         val pool = StringPoolWriter()
         val entries = ByteWriter()
-        for (id in 0 until entryCount) {
+        for (id in 0 until stored) {
             entries.bytes(keyCodec.encode(keyOf[id]))
             val attrs = attrsOf[id]
             entries.short(attrs.size)
@@ -82,6 +77,10 @@ public fun <K> ClusteredIndex<K>.encodeToByteArray(
         raw(entries.toByteArray())
     }
 
+    c.section("ORIG") { for (o in originOf) int(o) }
+    // Present only when routing is by graph; a reader takes its absence as "scan the centroids".
+    router?.let { graph -> c.section("ROUT") { raw(graph.encodeToByteArray(KeyCodec.int)) } }
+
     return c.toByteArray()
 }
 
@@ -89,43 +88,50 @@ public fun <K> ClusteredIndex<K>.encodeToByteArray(
  * Reconstructs a clustered index produced by [encodeToByteArray].
  *
  * @param expect refuse the index unless it recorded this provenance; see [decodeVectorIndex].
+ * @param store the quantizer the index was built with, if it was one of your own. Nothing in the
+ *   bytes names it, so reading with the wrong one is not detected — it decodes and returns nonsense.
  * @throws KromusFormatException if [bytes] are not a clustered index this build can read.
  */
-public fun <K> decodeClusteredIndex(
+public fun <K> decodeIvfIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     expect: String? = null,
-): ClusteredIndex<K> = decodeClusteredIndex(bytes, keyCodec, expect, skipVectors = false).index
+    store: VectorStoreFactory? = null,
+): IvfIndex<K> = decodeIvfIndex(bytes, keyCodec, expect, skipVectors = false, factory = store).index
 
 /** A decoded index, plus where its vectors sit in the bytes it came from. */
-internal class LoadedClusteredIndex<K>(
-    val index: ClusteredIndex<K>,
+internal class LoadedIvfIndex<K>(
+    val index: IvfIndex<K>,
     val vectorsOffset: Int,
     val vectorsLength: Int,
 )
 
-internal fun <K> decodeClusteredIndex(
+internal fun <K> decodeIvfIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     expect: String?,
     skipVectors: Boolean,
-): LoadedClusteredIndex<K> {
-    val c = ContainerReader(bytes, KIND_CLUSTERED, CLUSTERED_FORMAT, expect)
+    factory: VectorStoreFactory? = null,
+): LoadedIvfIndex<K> {
+    val c = ContainerReader(bytes, KIND_IVF, IVF_FORMAT, expect)
 
     val cfg = c.section(S_CONFIG)
     val dimensions = cfg.int()
     if (dimensions < 1) throw KromusFormatException("corrupt kromus index: dimensions $dimensions")
     val metric = cfg.enumValue(Metric.entries, "metric")
-    val config = ClusterConfig(
+    val config = IvfConfig(
         clusters = cfg.int(),
         nprobe = cfg.int(),
         targetRecall = cfg.float(),
+        assignments = cfg.int(),
+        routing = cfg.enumValue(Routing.entries, "routing"),
         seed = cfg.long(),
         iterations = cfg.int(),
         quantization = cfg.enumValue(Quantization.entries, "quantization"),
     )
     val n = cfg.int()
     val clusterCount = cfg.int()
+    val distinctEntries = cfg.int()
     val nprobe = cfg.int()
     val estimatedRecall = cfg.float()
     if (nprobe < 1) throw KromusFormatException("corrupt kromus index: nprobe $nprobe")
@@ -133,7 +139,10 @@ internal fun <K> decodeClusteredIndex(
     if (clusterCount < 0) throw KromusFormatException("corrupt kromus index: cluster count $clusterCount")
 
     // The table makes every one of these checkable before a single record is read.
-    val stride = vectorBytes(dimensions, config.quantization)
+    // A custom store defines its own stride, so the store is built before the length is checked
+    // against it — the check is still worth making, it just cannot assume the built-in layout.
+    val store = factory?.create(dimensions, metric) ?: Hnsw.newStore(dimensions, metric, config.quantization)
+    val stride = store.strideBytes
     if (c.lengthOf(S_VECTORS).toLong() != n.toLong() * stride) {
         throw KromusFormatException(
             "corrupt kromus index: the vector section is ${c.lengthOf(S_VECTORS)} byte(s), " +
@@ -172,16 +181,10 @@ internal fun <K> decodeClusteredIndex(
 
     // Skipping this is the point of a streamed load: the vectors are the bulk of the file, and a
     // reader that will page them in a cluster at a time has no reason to inflate them first.
-    val store = Hnsw.newStore(dimensions, metric, config.quantization)
     if (!skipVectors) {
         val vectors = c.section(S_VECTORS)
         repeat(n) {
-            when (store) {
-                is Float32VectorStore -> store.load(FloatArray(dimensions) { vectors.float() })
-                is Int8VectorStore -> store.load(ByteArray(dimensions) { vectors.byte().toByte() }, vectors.float())
-                is BinaryVectorStore -> store.load(LongArray((dimensions + 63) ushr 6) { vectors.long() })
-                else -> error("unknown vector store")
-            }
+            store.readVector(vectors)
         }
     }
 
@@ -204,8 +207,12 @@ internal fun <K> decodeClusteredIndex(
         }
     }
 
-    return LoadedClusteredIndex(
-        ClusteredIndex(
+    val originReader = c.section("ORIG")
+    val originOf = IntArray(n) { originReader.int() }
+    val router = if (c.has("ROUT")) decodeVectorIndex(c.sectionBytes("ROUT"), KeyCodec.int) else null
+
+    return LoadedIvfIndex(
+        IvfIndex(
             dimensions,
             metric,
             config,
@@ -215,6 +222,9 @@ internal fun <K> decodeClusteredIndex(
             store,
             keyOf,
             attrsOf,
+            originOf,
+            router,
+            distinctEntries,
             blocks = null,
             nprobe = nprobe,
             estimatedRecall = estimatedRecall,
@@ -236,18 +246,22 @@ internal fun <K> decodeClusteredIndex(
  * saving: the array is still held, so this form is for testing the path and for platforms with no file
  * to map. The memory is reclaimed only when [vectors] reads from somewhere that is not the heap.
  *
+ * There is no custom-store parameter here, unlike [decodeIvfIndex], for the same reason binary is
+ * refused below: a streamed scan reads the stored bytes directly, and only the built-in layouts are
+ * known to it. A store of your own has to be decoded rather than streamed.
+ *
  * @throws KromusFormatException if [bytes] are not a clustered index this build can read, or if the
  *   quantization is [Quantization.Binary], whose query path is a per-query lookup table that a
  *   byte-scanning copy could only duplicate or silently disagree with — and whose codes are small
  *   enough that streaming them saves nothing worth the risk.
  */
-public fun <K> viewClusteredIndex(
+public fun <K> viewIvfIndex(
     bytes: ByteArray,
     keyCodec: KeyCodec<K>,
     vectors: VectorBlocks? = null,
     expect: String? = null,
-): ClusteredIndex<K> {
-    val loaded = decodeClusteredIndex(bytes, keyCodec, expect, skipVectors = true)
+): IvfIndex<K> {
+    val loaded = decodeIvfIndex(bytes, keyCodec, expect, skipVectors = true, factory = null)
     if (!BlockDistance.supports(loaded.index.config.quantization)) {
         throw KromusFormatException(
             "a ${loaded.index.config.quantization} clustered index cannot be streamed: its query path " +

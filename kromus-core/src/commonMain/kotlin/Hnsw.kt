@@ -23,8 +23,8 @@ internal class Hnsw private constructor(
     private val config: HnswConfig,
     private val store: VectorStore,
 ) {
-    constructor(dimensions: Int, metric: Metric, config: HnswConfig) :
-        this(metric, config, newStore(dimensions, metric, config.quantization))
+    constructor(dimensions: Int, metric: Metric, config: HnswConfig, store: VectorStoreFactory? = null) :
+        this(metric, config, store?.create(dimensions, metric) ?: newStore(dimensions, metric, config.quantization))
 
     // Id-indexed graph columns, parallel to the store and sized by nodeCount. levels[id] is the
     // node's top layer; neighbors[id][layer] its adjacency list on that layer (present only for

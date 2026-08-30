@@ -11,7 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- **`ClusteredIndex`** — a second index type that groups the corpus instead of linking it into a
+- **`IvfIndex`** — a second index type that groups the corpus instead of linking it into a
   graph, searching only the groups nearest a query.
 
   It exists for one property a graph cannot have: **contiguity**. A graph traversal goes wherever the
@@ -44,7 +44,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   lower index, and a determined re-seed for an emptied group. Without that the layout would vary and
   with it the bytes.
 
-- **`VectorBlocks`** and **`viewClusteredIndex`** — a clustered index can read its vectors a cluster at
+- **`FlatIndex`** — exhaustive search, exact by construction. Faster than any index below a few
+  thousand vectors, and the thing recall is measured *against*, which is worth having on your own data
+  rather than only in a benchmark. Nothing to tune, so it also answers "do I need an index yet".
+
+- **`IvfIndex` is what `ClusteredIndex` was called.** It is the standard inverted-file structure in its
+  standard parts — k-means centroids as the coarse quantizer, one list per centroid, `nprobe` lists
+  opened per query — and naming it after the thing it is means someone who knows IVF recognises what
+  they have and what tuning applies. `ClusterConfig`/`ClusterEntry` follow to `IvfConfig`/`IvfEntry`.
+
+- **Redundant assignment and graph routing**, the two pieces that make an IVF index a
+  [SPANN](https://arxiv.org/abs/2111.08566) one. `IvfConfig.assignments` places a vector in its nearest
+  few lists, so a neighbour near a boundary is no longer lost to whichever side a query arrives from —
+  it costs storage, deliberately, and the duplicate is what keeps each list contiguous.
+  `IvfConfig.routing` navigates a graph over the centroids instead of scanning them, which is what
+  scaling past a few thousand lists requires; `Routing.Auto` switches on the count, because below it
+  the exact scan is both cheaper and exact. `IvfPresets.spann` sets all three together.
+
+- **Four public seams, so an index or a quantizer kromus does not ship can be added anyway.**
+  `VectorSearch` is what an index is from a caller's side; `VectorStore` is the quantizer seam, now
+  carrying its own byte layout so persistence no longer switches on the built-in types;
+  `ContainerWriter`/`ContainerReader` hand a third-party index the whole file format, checksums and
+  provenance included; `VectorBlocks` is where vectors are read from.
+
+  A custom store is accepted by all three index types and by each `decode…` function; `VectorIndex`
+  keeps the factory, since `compact()` and `clear()` rebuild the graph and would otherwise rebuild it
+  on different storage. Section lengths are now checked against the store's own `strideBytes` rather
+  than a table of the built-in layouts, so a file read with a store of the wrong width is refused
+  before a record is read. Streaming (`viewIvfIndex`/`viewFlatIndex`) does not take one: that scan
+  reads stored bytes directly and knows only the built-in layouts.
+
+  A test builds an int4 quantizer entirely from public API — under flat, graph and inverted file, it
+  round-trips byte-identically, survives a compaction, and lands between binary and full precision on
+  recall — which is the evidence that the seam carries something rather than merely existing.
+
+  `Metric` stays closed on purpose: exhaustive `when` over it is what lets each quantizer specialize
+  its arithmetic, the binary store's lookup table among them.
+
+- **`VectorBlocks`** and **`viewIvfIndex`** — a clustered index can read its vectors a cluster at
   a time instead of holding them. Each probed cluster is a contiguous run, so it arrives as one read
   and the distance loop runs over a plain array with no indirection per vector.
 
@@ -59,11 +96,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   quantization is refused: its query path is built per query, and its codes are small enough that
   there is nothing to reclaim.
 
-- **`ClusterSearcher`** — holds the buffer a streamed cluster is read into, so repeated queries do not
+- **`IvfSearcher`** — holds the buffer a streamed cluster is read into, so repeated queries do not
   each allocate one a whole cluster wide. One per thread; different searchers run in parallel, and
   nothing writes to the index.
 
-- **`ClusteredIndex.probedClusters`** and **`clusterSize`** — what a query will actually read. Each
+- **`IvfIndex.probedClusters`** and **`clusterSize`** — what a query will actually read. Each
   cluster is a contiguous run, so the probe list *is* the read plan; useful for sizing a cache and for
   measuring a file-backed index without assuming clusters are evenly sized, which k-means never
   promises.

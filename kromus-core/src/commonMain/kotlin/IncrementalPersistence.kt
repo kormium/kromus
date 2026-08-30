@@ -93,15 +93,7 @@ public fun <K> VectorIndex<K>.encodeDelta(keyCodec: KeyCodec<K>): ByteArray? {
         w.int(id)
         val level = g.levelAt(id)
         w.int(level)
-        when (store) {
-            is Float32VectorStore -> for (x in store.vectorAt(id)) w.float(x)
-            is Int8VectorStore -> {
-                for (b in store.codeAt(id)) w.byte(b.toInt())
-                w.float(store.scaleAt(id))
-            }
-            is BinaryVectorStore -> for (word in store.codeAt(id)) w.long(word)
-            else -> error("unknown vector store")
-        }
+        store.writeVector(id, w)
         w.byte(if (g.deletedAt(id)) 1 else 0)
         for (layer in 0..level) {
             val links = g.neighborsAtLayer(id, layer)
@@ -215,12 +207,7 @@ private fun <K> applyVectorDelta(
             )
         }
         val level = r.level(id)
-        when (store) {
-            is Float32VectorStore -> store.load(FloatArray(dimensions) { r.float() })
-            is Int8VectorStore -> store.load(ByteArray(dimensions) { r.byte().toByte() }, r.float())
-            is BinaryVectorStore -> store.load(LongArray((dimensions + 63) ushr 6) { r.long() })
-            else -> error("unknown vector store")
-        }
+        store.readVector(r)
         val deleted = r.byte() == 1
         g.appendRestoredNode(level, deleted, readLayers(r, level, capacity))
     }

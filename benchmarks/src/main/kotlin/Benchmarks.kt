@@ -1,9 +1,9 @@
 package io.github.kromus.benchmarks
 
-import io.github.kromus.ClusterConfig
-import io.github.kromus.ClusterEntry
-import io.github.kromus.ClusteredIndex
 import io.github.kromus.HnswConfig
+import io.github.kromus.IvfConfig
+import io.github.kromus.IvfEntry
+import io.github.kromus.IvfIndex
 import io.github.kromus.KeyCodec
 import io.github.kromus.Quantization
 import io.github.kromus.VectorIndex
@@ -396,10 +396,10 @@ fun graphVersusClusters(dimensions: Int, count: Int, queries: Int, k: Int): Repo
             "%,d".format(graphResult.second),
         )
 
-        val clustered = ClusteredIndex.build(
+        val clustered = IvfIndex.build(
             dimensions,
-            dataset.vectors.mapIndexed { i, v -> ClusterEntry(i, v) },
-            config = ClusterConfig(targetRecall = target),
+            dataset.vectors.mapIndexed { i, v -> IvfEntry(i, v) },
+            config = IvfConfig(targetRecall = target),
         )
         var hits = 0
         var clusterPages = 0L

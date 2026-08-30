@@ -32,6 +32,11 @@ private const val FIXED_HEADER = 8
 /** tag(4) + offset(4) + length(4) + checksum(8). */
 private const val TABLE_ENTRY = 20
 
+/**
+ * Kinds the library itself writes. A third-party index picks a byte outside this range — the reader
+ * only checks that the kind it was asked for is the kind it found, so the numbering is a convention
+ * rather than a registry.
+ */
 internal const val KIND_VECTOR: Int = 1
 internal const val KIND_TEXT: Int = 2
 internal const val KIND_HYBRID: Int = 3
@@ -41,9 +46,10 @@ internal const val KIND_HYBRID: Int = 3
 internal const val KIND_VECTOR_DELTA: Int = 4
 internal const val KIND_TEXT_DELTA: Int = 5
 internal const val KIND_HYBRID_DELTA: Int = 6
-internal const val KIND_CLUSTERED: Int = 7
+internal const val KIND_IVF: Int = 7
+internal const val KIND_FLAT: Int = 8
 
-internal fun kindName(kind: Int): String =
+public fun kindName(kind: Int): String =
     when (kind) {
         KIND_VECTOR -> "vector"
         KIND_TEXT -> "text"
@@ -51,12 +57,13 @@ internal fun kindName(kind: Int): String =
         KIND_VECTOR_DELTA -> "vector delta"
         KIND_TEXT_DELTA -> "text delta"
         KIND_HYBRID_DELTA -> "hybrid delta"
-        KIND_CLUSTERED -> "clustered"
+        KIND_IVF -> "ivf"
+        KIND_FLAT -> "flat"
         else -> "unknown($kind)"
     }
 
 /** Assembles a container. Sections are emitted in the order they are added, which keeps bytes stable. */
-internal class ContainerWriter(
+public class ContainerWriter(
     private val kind: Int,
     private val version: Int,
     private val provenance: String?,
@@ -64,7 +71,7 @@ internal class ContainerWriter(
     private val tags = ArrayList<String>()
     private val bodies = ArrayList<ByteArray>()
 
-    fun section(tag: String, build: ByteWriter.() -> Unit) {
+    public fun section(tag: String, build: ByteWriter.() -> Unit) {
         require(tag.length == 4) { "a section tag is four characters, was '$tag'" }
         val w = ByteWriter()
         w.build()
@@ -72,7 +79,7 @@ internal class ContainerWriter(
         bodies.add(w.toByteArray())
     }
 
-    fun toByteArray(): ByteArray {
+    public fun toByteArray(): ByteArray {
         val w = ByteWriter()
         w.byte(MAGIC_0)
         w.byte(MAGIC_1)
@@ -100,7 +107,7 @@ internal class ContainerWriter(
 }
 
 /** Reads a container: verifies the header, then hands out sections by tag. */
-internal class ContainerReader(
+public class ContainerReader(
     private val bytes: ByteArray,
     kind: Int,
     version: Int,
@@ -111,7 +118,7 @@ internal class ContainerReader(
     private val checksums = HashMap<String, Long>()
     private val verified = HashSet<String>()
 
-    val provenance: String?
+    public val provenance: String?
 
     init {
         val r = ByteReader(bytes)
@@ -159,16 +166,16 @@ internal class ContainerReader(
         }
     }
 
-    fun has(tag: String): Boolean = tag in offsets
+    public fun has(tag: String): Boolean = tag in offsets
 
-    fun lengthOf(tag: String): Int =
+    public fun lengthOf(tag: String): Int =
         lengths[tag] ?: throw KromusFormatException("kromus index is missing its '$tag' section")
 
-    fun offsetOf(tag: String): Int =
+    public fun offsetOf(tag: String): Int =
         offsets[tag] ?: throw KromusFormatException("kromus index is missing its '$tag' section")
 
     /** A section's bytes as their own array — for a section that is itself a nested container. */
-    fun sectionBytes(tag: String): ByteArray {
+    public fun sectionBytes(tag: String): ByteArray {
         val offset = offsetOf(tag)
         val length = lengthOf(tag)
         section(tag) // verifies the checksum
@@ -182,7 +189,7 @@ internal class ContainerReader(
      * it — which is what makes reading a graph without its vectors actually cheaper, rather than
      * cheaper except for the checksum pass.
      */
-    fun section(tag: String): ByteReader {
+    public fun section(tag: String): ByteReader {
         val offset = offsetOf(tag)
         val length = lengthOf(tag)
         if (verified.add(tag)) {
@@ -206,7 +213,7 @@ internal class ContainerReader(
 // stream that is replayed start to finish, and a table over a few kilobytes would cost more than it
 // tells anyone.
 
-internal fun ByteWriter.deltaHeader(kind: Int, version: Int) {
+public fun ByteWriter.deltaHeader(kind: Int, version: Int) {
     byte(MAGIC_0)
     byte(MAGIC_1)
     byte(MAGIC_2)
@@ -215,7 +222,7 @@ internal fun ByteWriter.deltaHeader(kind: Int, version: Int) {
     byte(version)
 }
 
-internal fun ByteReader.deltaHeader(kind: Int, version: Int) {
+public fun ByteReader.deltaHeader(kind: Int, version: Int) {
     if (remaining < 6) {
         throw KromusFormatException("not a kromus delta: only $remaining byte(s), need at least 6")
     }
