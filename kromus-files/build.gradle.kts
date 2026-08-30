@@ -41,7 +41,14 @@ kotlin {
     // worker. Both are in this artifact, and which one a program can use is a property of where it
     // runs rather than of how it was built.
     js {
-        browser()
+        browser {
+            testTask {
+                // Node's module loader does not exist in a browser, so the Node source cannot be
+                // exercised there. The OPFS tests do run here: their stand-in handle is plain
+                // JavaScript, and what they check is our half of the contract either way.
+                filter.excludeTestsMatching("io.github.kromus.files.NodeFileByteSourceTest")
+            }
+        }
         nodejs {
             testTask {
                 useMocha { timeout = "60s" }
@@ -50,7 +57,11 @@ kotlin {
     }
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
-        browser()
+        browser {
+            testTask {
+                filter.excludeTestsMatching("io.github.kromus.files.NodeFileByteSourceTest")
+            }
+        }
         nodejs {
             testTask {
                 useMocha { timeout = "60s" }
