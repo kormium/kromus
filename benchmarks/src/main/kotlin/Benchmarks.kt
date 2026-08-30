@@ -1,6 +1,9 @@
 package io.github.kromus.benchmarks
 
 import io.github.kromus.HnswConfig
+import io.github.kromus.IvfConfig
+import io.github.kromus.IvfEntry
+import io.github.kromus.IvfIndex
 import io.github.kromus.KeyCodec
 import io.github.kromus.Quantization
 import io.github.kromus.VectorIndex
@@ -311,6 +314,111 @@ fun parallelSearch(dataset: Dataset, k: Int, ef: Int, totalSearches: Int): Repor
             "%,.0f".format(rate),
             "%.2f×".format(rate / baseline),
             "%.0f µs".format(1_000_000.0 / (rate / threads)),
+        )
+    }
+    return report
+}
+
+/**
+ * Graph against clusters, **at equal recall**.
+ *
+ * Comparing them at fixed settings says nothing: a graph at `efSearch = 64` and clusters at
+ * `nprobe = 8` are two arbitrary points, and whichever happens to score better is an artefact of the
+ * corpus size. The question that means something is: to return the same answers, which one reads less?
+ *
+ * So both are tuned to the same target here — the clustered index measures its own probe count at
+ * build time, and the graph's `efSearch` is raised until it matches — and what is compared is the
+ * distinct 4 KiB pages of the vector region each query touches. Pages are what a file-backed index
+ * pays for, and contiguity is the one advantage clustering has that no amount of tuning gives a graph.
+ *
+ * **Read the spread column first.** These corpora are generated *from* centroids, which is the best
+ * case a clustered index can meet. Sweeping the spread is what keeps that from being an
+ * advertisement: as members drift from their centroids the structure it relies on stops being there.
+ */
+fun graphVersusClusters(dimensions: Int, count: Int, queries: Int, k: Int): Report {
+    val report = Report("Graph versus clusters, at equal recall")
+    report.note(
+        "Both tuned to the same recall — the clustered index measures its probe count from the " +
+            "corpus, the graph's efSearch is raised to match — and compared on the distinct 4 KiB " +
+            "pages of the vector region a query touches. `spread` is how far the corpus drifts from " +
+            "the centroids it was generated from: low is cleanly clustered, high is nearly " +
+            "structureless.",
+    )
+    report.columns("spread", "index", "setting", "recall@$k", "pages/query")
+
+    val pageSize = 4096
+    val stride = dimensions * 4
+    val target = 0.95f
+
+    for (spread in listOf(0.5f, 1f, 2f)) {
+        val dataset = Dataset.generate(count, dimensions, queries, spread = spread)
+        val truth = dataset.groundTruth(k).map { it.toSet() }
+
+        val graph = VectorIndex<Int>(dimensions)
+        for (i in dataset.vectors.indices) {
+            // The id travels as an attribute so the filter callback can record which nodes a query
+            // touched: the traversal calls it for every candidate it considers.
+            graph.add(i, dataset.vectors[i], mapOf("id" to i.toString()))
+        }
+
+        fun graphAt(ef: Int): Pair<Double, Long> {
+            var hits = 0
+            var pages = 0L
+            for ((qi, q) in dataset.queries.withIndex()) {
+                val touched = HashSet<Int>()
+                val found = graph.search(
+                    q,
+                    k,
+                    ef,
+                    filter = { attrs ->
+                        attrs["id"]?.toInt()?.let { id -> touched.add((id.toLong() * stride / pageSize).toInt()) }
+                        true
+                    },
+                )
+                hits += found.count { it.key in truth[qi] }
+                pages += touched.size
+            }
+            return hits / (k.toDouble() * dataset.queries.size) to pages / dataset.queries.size
+        }
+
+        // Raise efSearch until the graph reaches the same target the clustered index was built for.
+        var ef = 16
+        var graphResult = graphAt(ef)
+        while (graphResult.first < target && ef < 4096) {
+            ef *= 2
+            graphResult = graphAt(ef)
+        }
+        report.row(
+            "%.1f".format(spread),
+            "HNSW",
+            "efSearch=$ef",
+            "%.3f".format(graphResult.first),
+            "%,d".format(graphResult.second),
+        )
+
+        val clustered = IvfIndex.build(
+            dimensions,
+            dataset.vectors.mapIndexed { i, v -> IvfEntry(i, v) },
+            config = IvfConfig(targetRecall = target),
+        )
+        var hits = 0
+        var clusterPages = 0L
+        for ((qi, q) in dataset.queries.withIndex()) {
+            hits += clustered.search(q, k).count { it.key in truth[qi] }
+            // Counted, not estimated: k-means promises nothing about how evenly it splits.
+            var pages = 0L
+            for (c in clustered.probedClusters(q)) {
+                val bytes = clustered.clusterSize(c).toLong() * stride
+                pages += if (bytes == 0L) 0 else bytes / pageSize + 1
+            }
+            clusterPages += pages
+        }
+        report.row(
+            "%.1f".format(spread),
+            "clusters",
+            "nprobe=${clustered.nprobe} of ${clustered.clusters}",
+            "%.3f".format(hits / (k.toDouble() * dataset.queries.size)),
+            "%,d".format(clusterPages / dataset.queries.size),
         )
     }
     return report

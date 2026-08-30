@@ -83,41 +83,44 @@ internal class ReadWriteMutex {
     }
 
     private suspend fun acquireWrite() {
+        // Announced before anything else, so arriving readers start queueing immediately — and undone
+        // in a `finally`, because every way out of here has to undo it. Taking the queue mutex below
+        // suspends, so cancellation can leave by a path that never reaches the end of this function;
+        // an increment left behind there is permanent, and permanent is not an exaggeration. The
+        // readers' fast path is disabled while a writer waits, so a phantom waiter disables it for
+        // good: readers queue, are woken, see a writer still waiting, and queue again on a gate that
+        // nothing will ever open. Searches stop, and nothing in the logs says why.
         writersWaiting.addAndFetch(1)
-        if (holders.compareAndSet(0, -1)) {
-            writersWaiting.addAndFetch(-1)
-            return
-        }
-        val signal = queues.withLock {
-            if (holders.compareAndSet(0, -1)) {
-                writersWaiting.addAndFetch(-1)
-                return
-            }
-            CompletableDeferred<Unit>().also { writerQueue.addLast(it) }
-        }
-        // handOff marks us the holder before completing this, so on a normal wake there is nothing
-        // left to claim. On a cancelled one there is: the lock may already have been handed to a
-        // waiter that will never take it, which strands it for good. Leaving the queue has to happen
-        // either way, and it has to happen uninterruptibly.
         try {
-            signal.await()
-        } catch (cancellation: Throwable) {
-            withContext(NonCancellable) {
-                queues.withLock {
-                    if (writerQueue.remove(signal)) {
-                        // Still queued: nobody handed us anything, so just stop waiting.
-                        writersWaiting.addAndFetch(-1)
-                    } else {
-                        // Already made the holder — pass it on rather than hold it forever.
-                        writersWaiting.addAndFetch(-1)
-                        holders.store(0)
-                        handOff()
+            if (holders.compareAndSet(0, -1)) return
+            val signal = queues.withLock {
+                // Re-check inside: the holder may have left between the failed attempt and here.
+                if (holders.compareAndSet(0, -1)) return@acquireWrite
+                CompletableDeferred<Unit>().also { writerQueue.addLast(it) }
+            }
+            // handOff marks us the holder before completing this, so on a normal wake there is
+            // nothing left to claim. On a cancelled one there is: the lock may already have been
+            // handed to a waiter that will never take it, which strands it for good. Leaving the
+            // queue has to happen either way, and it has to happen uninterruptibly.
+            try {
+                signal.await()
+            } catch (cancellation: Throwable) {
+                withContext(NonCancellable) {
+                    queues.withLock {
+                        // Still queued means nobody handed us anything, so leaving is enough.
+                        // Already gone from it means we were made the holder, and the lock has to be
+                        // passed on rather than held forever by a coroutine that is not coming back.
+                        if (!writerQueue.remove(signal)) {
+                            holders.store(0)
+                            handOff()
+                        }
                     }
                 }
+                throw cancellation
             }
-            throw cancellation
+        } finally {
+            writersWaiting.addAndFetch(-1)
         }
-        writersWaiting.addAndFetch(-1)
     }
 
     private suspend fun releaseWrite() {

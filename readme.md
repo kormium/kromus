@@ -77,6 +77,7 @@ kotlin {
         implementation("io.github.kormium:kromus-core:0.16.0")
 
         // Optional companion modules — see their own readmes for details.
+        implementation("io.github.kormium:kromus-files:0.16.0") // search an index from a file
         implementation("io.github.kormium:kromus-kemus:0.16.0") // persist into a kemus store
         implementation("io.github.kormium:kromus-onnx:0.16.0")  // on-device text embedder
         implementation("io.github.kormium:kromus-sync:0.16.0")  // keep an index fresh from a Flow
@@ -210,6 +211,185 @@ The index's own contract is unchanged: **nothing may write to it while a search 
 reads parallel, not reads-and-writes concurrent. If something is writing — a sync keeping the index
 fresh — use [`kromus-sync`](kromus-sync/)'s `.concurrent()` wrapper, which arranges both: searches run
 alongside each other, a writer runs alone, and a writer is not starved by a steady stream of searches.
+
+### Three index types
+
+| | what it is | when |
+| --- | --- | --- |
+| `FlatIndex` | exhaustive scan, no structure | small corpora, and as the exact answer to check the others against |
+| `VectorIndex` | HNSW graph | the index is resident and queried in the same process |
+| `IvfIndex` | inverted file: k-means centroids, one list per centroid, `nprobe` lists opened per query | the index is built elsewhere and read from a file |
+
+They are the standard structures under their standard names, so what is known about tuning each
+applies here unchanged.
+
+```kotlin
+// exhaustive and exact — no build step, nothing to tune
+val flat = FlatIndex.build(dimensions = 384, entries = docs)
+
+// a graph — the best in-memory structure
+val graph = VectorIndex<String>(dimensions = 384).also { docs.forEach { d -> it.add(d.id, d.vector) } }
+
+// an inverted file — the best structure on a file
+val ivf = IvfIndex.build(dimensions = 384, entries = docs)
+```
+
+**IVF needs no tuning to start.** How many lists a query must open is a property of the data — one
+where the corpus partitions cleanly, dozens where it barely does — so `build` measures the corpus and
+picks. `index.nprobe` is what it chose and `index.estimatedRecall` what that was measured to be worth;
+the estimate is optimistic on hard corpora and says so.
+
+**The graph is better in memory**, because it is guided by real distances to real vectors at every hop
+where a partitioned index commits to a set of lists before looking at a single point. **The inverted
+file is better on a file**, because a list is a contiguous run: at equal recall on clusterable data
+that is 10 pages read against 43. No arrangement of a file gives a graph the same thing — its access
+pattern is the algorithm.
+
+#### SPANN
+
+[SPANN](https://arxiv.org/abs/2111.08566) is not a fourth structure. It is `IvfIndex` with three
+choices made together, and it is available as a preset:
+
+```kotlin
+val index = IvfIndex.build(
+    dimensions = 384,
+    entries = docs,
+    config = IvfPresets.spann(entryCount = docs.size, postingSize = 128),
+)
+```
+
+- **many small lists**, so a query reads little — sized by how many entries a list should hold rather
+  than by a list count, because the size of the read is what matters;
+- **`Routing.Graph`**, because scanning that many centroids would itself become the expensive part —
+  the router is the same HNSW the library already has, applied to the centroids;
+- **redundant assignment**, so a vector near a boundary sits in both lists and stops being lost to
+  whichever side a query arrives from. It costs storage: a vector in two lists is stored twice, which
+  is deliberate — disk is cheaper than the recall lost at a boundary, and the duplicate is what keeps
+  each list contiguous.
+
+The fourth part of the design, postings that live on disk rather than in memory, is a loader rather
+than a setting — see [`openIvfIndex`](#reading-vectors-without-holding-them).
+
+#### Reading vectors without holding them
+
+`openIvfIndex` and `openFlatIndex` take a `ByteSource` and read through it — one list at a time for
+IVF, in batches for a flat scan — instead of inflating the file. Only the header and the small
+sections are read when the index opens: centroids, the list table, keys and attributes, a few
+megabytes where the vectors are tens. The vector region is not touched until a query asks for a
+cluster.
+
+```kotlin
+val source = FileByteSource.open("$filesDir/catalogue.krm")   // kromus-files
+val index = openIvfIndex(source, KeyCodec.string)
+
+val hits = index.search(queryVector, 10)   // reads the probed clusters, nothing else
+source.close()                              // the index stops working here, not before
+```
+
+`ByteArraySource` over a blob you already hold is the honest baseline rather than a saving — the array
+is still there. The memory is reclaimed when the source reads from somewhere that is not the heap.
+
+**What that costs, measured on the access pattern rather than argued:** opening a 600-entry index
+reads less than its vector section occupies, and ten queries at `nprobe = 3` together read less than
+the file — the assertions are in `ByteSourceTest`, against the size of the vector region rather than
+against a number chosen to pass.
+
+`kromus-files` ships a source for every platform that has synchronous file access:
+
+| source | where | notes |
+| --- | --- | --- |
+| `FileByteSource` | JVM, Android | positional `FileChannel` reads; one open file serves every thread |
+| `FileByteSource` | iOS, macOS, Linux, Windows | buffered `fopen`/`fseek`/`fread`; one source per thread |
+| `NodeFileByteSource` | Node (JS and Wasm) | `fs.readSync` |
+| `OpfsByteSource` | browser (JS and Wasm) | **worker only** — see below |
+
+`openRange` on the first three opens an index packed inside a larger file, which is the shape an
+Android asset arrives in: an `AssetFileDescriptor` gives the APK's path with the entry's offset and
+length. Note that an APK asset is compressed by default and cannot be read at an offset at all —
+either mark it `noCompress`, or copy it into `filesDir` once on first run.
+
+In the browser, the only synchronous file read is OPFS's `createSyncAccessHandle`, and it exists
+**only inside a Web Worker**. That is a constraint of the platform, not a choice made here — so a
+file-backed search runs in a worker and posts its results back, which is where a scan over thousands
+of vectors belongs anyway. `OpfsByteSource` takes an already-open handle rather than opening one, so
+that everything asynchronous stays with the caller and `ByteSource` can stay synchronous.
+
+Honest about coverage: the OPFS sources are tested against a stand-in handle that reproduces the
+browser's contract, including reads that return fewer bytes than asked for. The binding to the
+browser's own object is not exercised by CI, because a test runner drives the main thread and a real
+handle cannot be created there.
+
+### Writing your own
+
+The three index types are implementations, not the extent of what fits. Four seams are public so that
+a structure, a quantizer or a place to read bytes from that kromus does not ship can be added without
+waiting for it to be added here.
+
+**`VectorSearch<K>`** — what an index is, from a caller's side: dimensions, metric, keys, and a
+`searcher()`. Write against it and the choice between flat, graph and inverted file becomes
+configuration rather than a rewrite. A fourth implementation satisfies it by answering queries; nothing
+in it assumes a graph or a partitioning.
+
+**`VectorStore`** — how vectors are stored and how distance to them is computed. This is the quantizer
+seam. The built-in trades are full precision, 8 bits and 1 bit; a different trade is an implementation
+of this interface and nothing else:
+
+```kotlin
+class MyQuantizer(override val dimensions: Int, override val metric: Metric) : VectorStore {
+    override val strideBytes: Int get() = /* bytes one vector takes */
+    override fun add(prepared: FloatArray): Int = /* … */
+    override fun distanceToQuery(query: FloatArray, id: Int): Float = /* … */
+    override fun writeVector(id: Int, out: ByteWriter) { /* … */ }
+    override fun readVector(from: ByteReader) { /* … */ }
+    // distanceBetween, reconstruct, size
+}
+
+val mine = VectorStoreFactory { d, m -> MyQuantizer(d, m) }
+
+val flat = FlatIndex.build(384, entries, store = mine)
+val ivf = IvfIndex.build(384, entries, store = mine)
+val graph = VectorIndex<String>(384, store = mine)
+
+val reloaded = decodeVectorIndex(bytes, KeyCodec.string, store = mine)
+```
+
+All three index types take one, and so does each of `decodeVectorIndex`, `decodeIvfIndex` and
+`decodeFlatIndex`. `VectorIndex` keeps the factory, because `compact()` and `clear()` rebuild the
+graph and would otherwise rebuild it on different storage.
+
+Nothing in the bytes names the quantizer, so the same factory is supplied when reading. That is the
+honest contract: the alternative is a registry of quantizer ids, which buys nothing until more than
+one program reads the file. What *is* checked is the stride — a file whose vector section is not
+`size × strideBytes` long is refused before a record is read, so supplying a store of the wrong width
+fails loudly rather than quietly. One of the same width does not; that much is on you.
+[ScaNN](https://arxiv.org/abs/1908.10396)'s anisotropic quantization is a store; so is int4, so is
+product quantization — and `rerank`, the other half of that pipeline, already ships.
+
+**`ContainerWriter` / `ContainerReader`** — the file format: named sections, per-section checksums,
+provenance, a kind byte and a version. An index of your own gets all of it, and the same diagnostics,
+rather than inventing a format beside kromus's.
+
+**`ByteSource`** — where an index's bytes come from. Three methods: `size`, `read(offset, length,
+into, at)` and `close()`. `kromus-files` implements it over a file on every platform that has
+synchronous file access, and anything else is the same interface and nothing more — a decrypting
+reader, an Android `AssetFileDescriptor`, a virtual file system, a cache that fetches and spills to
+local storage.
+
+The one rule that is not optional: **`read` must fill exactly what was asked for.** Returning early is
+the single failure this interface cannot detect — a partly-filled buffer leaves whatever was there
+before in the tail, and the scan reads it as vector data. Nothing throws, and the query comes back
+with neighbours that are merely plausible. Loop until the range is complete, and throw
+`KromusFormatException` if it cannot be. Every source in `kromus-files` is tested against a stand-in
+that deliberately reads short.
+
+This one does not combine with a custom `VectorStore`: a streamed scan reads the stored bytes directly
+and only the built-in layouts are known to it, so a store of your own is decoded rather than
+streamed.
+
+What is deliberately *not* open is `Metric`. It is a closed enum, and exhaustive `when` over it is what
+lets each quantizer specialize its arithmetic — the binary store's per-query lookup table among them.
+Opening it means either losing that or asking every store to handle a metric it has never seen; the
+cost is real and the gain smaller than the seams above.
 
 ### Persistence
 
@@ -380,10 +560,10 @@ the bytes you actually ship or cache.
 
 | mode | serialized | build | recall@10 | mean query |
 | --- | --- | --- | --- | --- |
-| `None` | 30.7 MiB | 21.9 s | 0.997 | 145 µs |
-| `Int8` | 12.5 MiB | 19.9 s | 0.986 | 149 µs |
-| `Binary` | 7.0 MiB | 11.5 s | 0.283 | 73 µs |
-| `Binary` + re-rank | 7.0 MiB | — | 0.845 | 189 µs |
+| `None` | 27.8 MiB | 21.9 s | 0.997 | 145 µs |
+| `Int8` | 9.7 MiB | 19.9 s | 0.986 | 149 µs |
+| `Binary` | 4.2 MiB | 11.5 s | 0.283 | 73 µs |
+| `Binary` + re-rank | 4.2 MiB | — | 0.845 | 189 µs |
 
 `Int8` is close to free: 2.5× smaller for one point of recall. `Binary` is 4.4× smaller and the
 fastest to build and query, but on its own it is genuinely coarse — pair it with a full-precision
@@ -433,6 +613,31 @@ the crossover is real rather than an artefact of comparing against a stale snaps
 
 The gap narrows as the batch grows, which is the signal to fold: once a batch is worth a sizeable
 fraction of the index, a delta stops being a bargain and a fresh snapshot is the better save.
+
+### Graph versus clusters, at equal recall
+
+Comparing the two at fixed settings says nothing — a graph at `efSearch = 64` and clusters at
+`nprobe = 8` are two arbitrary points, and whichever scores better is an artefact of the corpus size.
+The question that means something is: **to return the same answers, which one reads less?** So both
+are tuned to the same target and compared on pages touched.
+
+`spread` is how far the corpus drifts from the centroids it was generated from — low is cleanly
+clustered, high is nearly structureless. Read it first: a corpus built *from* centroids is the best
+case a clustered index can meet, and saying so is what separates a measurement from an advertisement.
+
+| spread | index | setting | recall@10 | pages/query |
+| --- | --- | --- | --- | --- |
+| 0.5 | HNSW | efSearch=16 | 1.000 | 43 |
+| 0.5 | clusters | nprobe=1 of 70 | 1.000 | **10** |
+| 1.0 | HNSW | efSearch=16 | 0.992 | 51 |
+| 1.0 | clusters | nprobe=1 of 70 | 1.000 | **10** |
+| 2.0 | HNSW | efSearch=128 | 0.956 | 301 |
+| 2.0 | clusters | nprobe=26 of 70 | 0.892 | 246 |
+
+Where the corpus has group structure, the clustered index answers as well for a fifth of the reading,
+and finds its own `nprobe = 1` without being told. Where it does not, the advantage nearly vanishes:
+slightly fewer pages, and less recall for them. **Which case you are in is a property of your data,
+not a setting** — build both and compare, it costs one afternoon.
 
 ### Parallel search
 
@@ -548,7 +753,10 @@ than the core because it needs coroutines, and the core has no dependencies.
 ## Design principles
 
 - **Zero dependencies** in the vector layer. HNSW is arithmetic over `FloatArray` and graph
-  structures in common code — no coroutines, serialization, crypto or native interop.
+  structures in common code — no coroutines, serialization, crypto or native interop. That holds for
+  `kromus-core` in full: reading an index from a file needs platform APIs, so the interface lives in
+  core and the implementations live in `kromus-files`, which is optional and separate for exactly
+  this reason.
 - **Deterministic.** Level assignment is seeded (`HnswConfig.seed`), float arithmetic runs in a fixed
   order, BM25 scores accumulate in query order and break ties by insertion order, and serialization
   writes records by id rather than by hash iteration order. So an index built from the same data on
@@ -587,6 +795,17 @@ JVM · Android · iOS (x64/arm64/simulator) · linuxX64/Arm64 · macosX64/Arm64 
     its deltas, with the chain checked so a stray delta cannot be applied.
 18. **Parallel search** ✅ `searcher()` gives a reader its own traversal state, so searches run on every
     core; `kromus-sync`'s wrappers pair that with a writer-preferring lock.
+19. **Sectioned format** ✅ every index is a container of named, checksummed sections — denser, locatable
+    corruption, and readable in parts.
+20. **Clustered index** ✅ `IvfIndex` groups the corpus instead of linking it, trading recall for
+    the contiguity a file-backed index needs; `IvfConfig.assignments` and `.routing` make it a SPANN
+    one, and `FlatIndex` is exhaustive search for when an index is not needed at all.
+21. **Open seams** ✅ `VectorSearch`, `VectorStore`, `ContainerWriter`/`ContainerReader` and
+    `ByteSource` are public, so an index type, a quantizer or a source of bytes kromus does not ship
+    can be written against the same format and the same guarantees.
+22. **Search from a file** ✅ `openIvfIndex`/`openFlatIndex` read through a `ByteSource`, and
+    [`kromus-files`](kromus-files/) implements one on JVM, Android, iOS, macOS, Linux, Windows, Node
+    and the browser (OPFS, in a worker). The ceiling stops being memory and becomes storage.
 
 Next: multi-value and numeric metadata filters, an incremental "add to a persisted index without a
 full re-encode" path, and SIMD-friendly distance kernels where a platform offers them without
