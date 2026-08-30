@@ -204,6 +204,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **A cancelled writer no longer switches the readers' fast path off for good.** A writer announces
+  itself before it queues — that announcement is what makes the lock writer-preferring, since arriving
+  readers stop taking the fast path once one is waiting. Taking the queue is a suspension point, so a
+  coroutine cancelled there left by a path that never withdrew the announcement, and the count of
+  waiting writers stayed above zero for the life of the lock.
+
+  What that looks like is not a stuck lock. Writers keep working: they take the free lock directly.
+  Every *reader* queues behind a writer that does not exist, is woken, sees one still waiting, and
+  queues again on a gate nothing will ever open. Searches stop and nothing says why.
+
+  The announcement is withdrawn in a `finally` now, so every way out of the acquire undoes it. The
+  regression test cancels waves of writers while the queue is contended, which is the window, and
+  asserts that a *search* still returns — it reproduces the hang without the fix and passes with it.
+  This was found by CI on a two-core runner, where the timing that had made it rare stopped being
+  rare.
+
 - **A corrupt node level no longer exhausts the heap.** A level is a count in disguise — `level + 1`
   adjacency lists follow it — but it was validated only for being non-negative, so a corrupt two
   billion reached `Array(level + 1)` and took the process down before any other check ran. That is the

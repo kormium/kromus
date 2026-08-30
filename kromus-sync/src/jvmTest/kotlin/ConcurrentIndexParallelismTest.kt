@@ -230,4 +230,54 @@ class ConcurrentIndexParallelismTest {
             }
         }
     }
+
+    @Test
+    fun aWriterCancelledWhileQueueingDoesNotDisableTheReadersForever() {
+        // The other half of the same problem, and the one that does not look like a lock at all.
+        //
+        // A writer announces itself before it queues, because that announcement is what makes the
+        // lock writer-preferring — arriving readers stop taking the fast path. Announcing and then
+        // leaving by a path that does not withdraw it produces a waiter that does not exist, and the
+        // readers' fast path stays off for the life of the lock: each one queues, is woken, sees a
+        // writer still waiting, and queues again on a gate nothing will open. Writers keep working
+        // throughout, which is what makes it hard to attribute — the index is not stuck, only every
+        // search is.
+        //
+        // Cancelling a writer while it is waiting for the queue mutex is the window, so the mutex is
+        // kept busy: many writers arriving at once, cancelled almost immediately.
+        val guarded = VectorIndex<Int>(dim, Metric.Cosine).concurrent()
+        corpus(40, 41).forEachIndexed { i, v -> runBlocking { guarded.add(i, v) } }
+        val query = corpus(1, 42).first()
+
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val holding = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                val holder = launch {
+                    guarded.use {
+                        holding.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                    }
+                }
+                holding.await(10, TimeUnit.SECONDS)
+
+                // Contend for the queue mutex rather than for the lock: every one of these has to
+                // take it to enqueue, and every one is cancelled while it may still be waiting for it.
+                repeat(12) {
+                    val wave = (0 until 25).map { n -> launch { guarded.add(2000 + n, query) } }
+                    Thread.sleep(1)
+                    wave.forEach { it.cancel() }
+                }
+
+                release.countDown()
+                holder.join()
+
+                // A search is the assertion. A stranded lock would fail the previous test; this one
+                // fails only if the readers' fast path was switched off and left off.
+                withTimeout(10_000) {
+                    repeat(20) { assertTrue(guarded.search(query, 5).isNotEmpty()) }
+                }
+            }
+        }
+    }
 }
