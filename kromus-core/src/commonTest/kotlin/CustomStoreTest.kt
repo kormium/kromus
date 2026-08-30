@@ -104,10 +104,7 @@ class CustomStoreTest {
         // Nothing in the bytes names the quantizer, so the same factory has to be supplied to read it.
         val reloaded = decodeFlatIndex(blob, KeyCodec.int, store = factory)
         val q = v[7]
-        assertEquals(
-            index.search(q, 10).map { it.key to it.score },
-            reloaded.search(q, 10).map { it.key to it.score },
-        )
+        assertSameResults(index.search(q, 10), reloaded.search(q, 10), "reloaded")
         // And the format's own guarantees still hold over it.
         assertContentEquals(blob, reloaded.encodeToByteArray(KeyCodec.int))
     }

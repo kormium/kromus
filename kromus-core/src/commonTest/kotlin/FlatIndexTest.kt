@@ -100,9 +100,9 @@ class FlatIndexTest {
                 val resident = decodeFlatIndex(blob, KeyCodec.int)
                 val streamed = viewFlatIndex(blob, KeyCodec.int)
                 val q = v[13]
-                assertEquals(
-                    resident.search(q, 10).map { it.key to it.score },
-                    streamed.search(q, 10).map { it.key to it.score },
+                assertSameResults(
+                    resident.search(q, 10),
+                    streamed.search(q, 10),
                     "$quantization/$metric",
                 )
             }

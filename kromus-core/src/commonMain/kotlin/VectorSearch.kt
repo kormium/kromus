@@ -38,6 +38,23 @@ public interface VectorSearch<K> {
      * running against an index nothing writes to.
      */
     public fun searcher(): Searcher<K>
+
+    /**
+     * Returns up to [k] entries nearest to [query], closest first, through a fresh [searcher].
+     *
+     * Convenient for a one-off query. For repeated ones hold a [searcher] instead — that is what lets
+     * an implementation reuse its buffers rather than allocate per query.
+     *
+     * This is a member rather than an extension so that it needs no import, and so that an index with
+     * a richer search of its own — [IvfIndex], whose overload takes an `nprobe` — can offer both
+     * without the plain form resolving to the wrong one.
+     *
+     * @param filter optional predicate over each entry's attributes; only entries it accepts are
+     *   returned.
+     * @throws IllegalArgumentException if `query.size != dimensions` or `k < 1`.
+     */
+    public fun search(query: FloatArray, k: Int, filter: MetadataFilter? = null): List<SearchResult<K>> =
+        searcher().search(query, k, filter)
 }
 
 /** A reader over a [VectorSearch]; see [VectorSearch.searcher]. */
@@ -51,15 +68,3 @@ public interface Searcher<K> {
      */
     public fun search(query: FloatArray, k: Int, filter: MetadataFilter? = null): List<SearchResult<K>>
 }
-
-/**
- * Searches through a fresh [Searcher].
- *
- * Convenient for a one-off query. For repeated ones hold a [VectorSearch.searcher] instead — that is
- * what lets an implementation reuse its buffers rather than allocate per query.
- */
-public fun <K> VectorSearch<K>.search(
-    query: FloatArray,
-    k: Int,
-    filter: MetadataFilter? = null,
-): List<SearchResult<K>> = searcher().search(query, k, filter)

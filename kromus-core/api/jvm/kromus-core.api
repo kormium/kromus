@@ -109,6 +109,7 @@ public final class io/github/kromus/FlatIndex : io/github/kromus/VectorSearch {
 	public fun getMetric ()Lio/github/kromus/Metric;
 	public final fun getQuantization ()Lio/github/kromus/Quantization;
 	public fun getSize ()I
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public fun searcher ()Lio/github/kromus/FlatSearcher;
 	public synthetic fun searcher ()Lio/github/kromus/Searcher;
 }
@@ -292,6 +293,7 @@ public final class io/github/kromus/IvfIndex : io/github/kromus/VectorSearch {
 	public final fun probedClusters ([FI)[I
 	public static synthetic fun probedClusters$default (Lio/github/kromus/IvfIndex;[FIILjava/lang/Object;)[I
 	public final fun search ([FIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/IvfIndex;[FIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public fun searcher ()Lio/github/kromus/IvfSearcher;
 	public synthetic fun searcher ()Lio/github/kromus/Searcher;
@@ -489,6 +491,7 @@ public final class io/github/kromus/VectorIndex : io/github/kromus/VectorSearch 
 	public final fun getTombstones ()I
 	public final fun remove (Ljava/lang/Object;)Z
 	public final fun search ([FIIILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/VectorIndex;[FIIILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public synthetic fun searcher ()Lio/github/kromus/Searcher;
 	public fun searcher ()Lio/github/kromus/VectorSearcher;
@@ -502,11 +505,13 @@ public abstract interface class io/github/kromus/VectorSearch {
 	public abstract fun getKeys ()Ljava/util/Set;
 	public abstract fun getMetric ()Lio/github/kromus/Metric;
 	public abstract fun getSize ()I
+	public fun search ([FILkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public static synthetic fun search$default (Lio/github/kromus/VectorSearch;[FILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 	public abstract fun searcher ()Lio/github/kromus/Searcher;
 }
 
-public final class io/github/kromus/VectorSearchKt {
-	public static final fun search (Lio/github/kromus/VectorSearch;[FILkotlin/jvm/functions/Function1;)Ljava/util/List;
+public final class io/github/kromus/VectorSearch$DefaultImpls {
+	public static fun search (Lio/github/kromus/VectorSearch;[FILkotlin/jvm/functions/Function1;)Ljava/util/List;
 	public static synthetic fun search$default (Lio/github/kromus/VectorSearch;[FILkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/List;
 }
 

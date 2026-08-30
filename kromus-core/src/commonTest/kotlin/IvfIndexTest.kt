@@ -179,15 +179,17 @@ class IvfIndexTest {
 
         assertEquals(index.size, reloaded.size)
         assertContentEquals(index.keys.toList(), reloaded.keys.toList())
-        assertEquals(index.config, reloaded.config)
+        // Every field but the one float, which is compared to float precision — see assertSameFloat.
+        assertEquals(index.config.copy(targetRecall = 1f), reloaded.config.copy(targetRecall = 1f))
+        assertSameFloat(index.config.targetRecall, reloaded.config.targetRecall, "targetRecall")
         assertEquals(mapOf("bucket" to "1"), reloaded.attributesOf(1))
 
         val rng = Random(22)
         repeat(15) {
             val q = FloatArray(dim) { rng.nextFloat() * 2f - 1f }
-            assertEquals(
-                index.search(q, 10).map { it.key to it.score },
-                reloaded.search(q, 10).map { it.key to it.score },
+            assertSameResults(
+                index.search(q, 10),
+                reloaded.search(q, 10),
                 "a reloaded index must rank and score identically",
             )
         }
@@ -271,7 +273,7 @@ class IvfIndexTest {
         val index = IvfIndex.build(dim, entries(scattered(600, 46)))
         val reloaded = decodeIvfIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
         assertEquals(index.nprobe, reloaded.nprobe)
-        assertEquals(index.estimatedRecall, reloaded.estimatedRecall)
+        assertSameFloat(index.estimatedRecall, reloaded.estimatedRecall, "estimatedRecall")
     }
 
     /** A corpus with no cluster structure to find — uniform noise, the hard end for this index. */
@@ -302,9 +304,9 @@ class IvfIndexTest {
                 val rng = Random(52)
                 repeat(15) {
                     val q = FloatArray(dim) { rng.nextFloat() * 2f - 1f }
-                    assertEquals(
-                        resident.search(q, 10).map { it.key to it.score },
-                        streamed.search(q, 10).map { it.key to it.score },
+                    assertSameResults(
+                        resident.search(q, 10),
+                        streamed.search(q, 10),
                         "$quantization/$metric",
                     )
                 }
@@ -400,9 +402,9 @@ class IvfIndexTest {
         assertEquals(index.size, reloaded.size)
         assertEquals(index.storedVectors, reloaded.storedVectors)
         val q = data[11]
-        val expected = index.search(q, 10).map { it.key to it.score }
-        assertEquals(expected, reloaded.search(q, 10).map { it.key to it.score })
-        assertEquals(expected, streamed.search(q, 10).map { it.key to it.score })
+        val expected = index.search(q, 10)
+        assertSameResults(expected, reloaded.search(q, 10), "reloaded")
+        assertSameResults(expected, streamed.search(q, 10), "streamed")
     }
 
     @Test
