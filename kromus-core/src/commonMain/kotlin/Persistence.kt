@@ -143,7 +143,7 @@ public fun <K> VectorIndex<K>.encodeToByteArray(
     }
 
     val bytes = c.toByteArray()
-    checkpoint(checksumOf(bytes))
+    checkpoint(revisionOf(bytes))
     return bytes
 }
 
@@ -263,17 +263,9 @@ public fun <K> decodeVectorIndex(
     val hnsw = Hnsw.restore(metric, config, vectorStore, levels, neighbors, deleted, entryPoint, topLayer)
     val index = VectorIndex.fromState(dimensions, metric, config, hnsw, live, liveAttrs, n, store)
     // A freshly decoded index is a checkpoint of exactly these bytes, so deltas can chain onto it.
-    index.checkpoint(checksumOf(bytes))
+    index.checkpoint(revisionOf(bytes))
     return index
 }
-
-/** Bytes one stored vector occupies, in the layout the encoder writes. */
-internal fun vectorBytes(dimensions: Int, quantization: Quantization): Int =
-    when (quantization) {
-        Quantization.None -> 4 * dimensions
-        Quantization.Int8 -> dimensions + 4
-        Quantization.Binary -> 8 * ((dimensions + 63) ushr 6)
-    }
 
 /**
  * A string-keyed map's entries in key order — the canonical layout every encoder writes.
@@ -298,6 +290,8 @@ public fun provenanceOf(bytes: ByteArray): String? {
         KIND_VECTOR -> VECTOR_FORMAT
         KIND_TEXT -> TEXT_FORMAT
         KIND_HYBRID -> HYBRID_FORMAT
+        KIND_IVF -> IVF_FORMAT
+        KIND_FLAT -> FLAT_FORMAT
         else -> throw KromusFormatException("not a readable kromus index: unknown kind $kind")
     }
     return ContainerReader(bytes, kind, version, expect = null).provenance
@@ -346,7 +340,7 @@ public fun <K> TextIndex<K>.encodeToByteArray(
     }
 
     val bytes = c.toByteArray()
-    checkpoint(checksumOf(bytes))
+    checkpoint(revisionOf(bytes))
     return bytes
 }
 
@@ -390,7 +384,7 @@ public fun <K> decodeTextIndex(
         }
         index.loadDoc(key, termFreqs, length, attributes)
     }
-    index.checkpoint(checksumOf(bytes))
+    index.checkpoint(revisionOf(bytes))
     return index
 }
 

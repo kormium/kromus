@@ -8,7 +8,7 @@ package io.github.kromus
 // That is the property a graph index cannot have — its traversal goes wherever the data says, and no
 // arrangement of the file changes that.
 
-private const val IVF_FORMAT: Int = 1
+internal const val IVF_FORMAT: Int = 1
 
 private const val S_CONFIG = "CNFG"
 private const val S_CENTROIDS = "CNTR"
@@ -210,8 +210,27 @@ internal fun <K> decodeIvfIndex(
         }
     }
 
+    // Every stored copy names the entry it came from, and a search indexes an array sized by the
+    // distinct count with it — so an origin outside that range is an IndexOutOfBounds at query time,
+    // thousands of reads after the byte that caused it, rather than a format error here. A distinct
+    // count of zero over a non-empty index is worse still: nothing throws and every search comes back
+    // empty.
+    if (distinctEntries < 0 || distinctEntries > n || (n > 0 && distinctEntries == 0)) {
+        throw KromusFormatException(
+            "corrupt kromus index: $distinctEntries distinct entr(ies) over $n stored copy(ies)",
+        )
+    }
     val originReader = c.section("ORIG")
-    val originOf = IntArray(n) { originReader.int() }
+    val originOf = IntArray(n) {
+        val origin = originReader.int()
+        if (origin < 0 || origin >= distinctEntries) {
+            throw KromusFormatException(
+                "corrupt kromus index: stored copy $it comes from entry $origin, " +
+                    "but the index holds $distinctEntries",
+            )
+        }
+        origin
+    }
     val router = if (c.has("ROUT")) decodeVectorIndex(c.sectionBytes("ROUT"), KeyCodec.int) else null
 
     return LoadedIvfIndex(

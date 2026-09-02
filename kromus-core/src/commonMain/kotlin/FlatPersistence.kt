@@ -3,7 +3,7 @@ package io.github.kromus
 // Persistence for the exhaustive index. The simplest layout in the library: no graph, no partitioning,
 // so the sections are the config, the vectors at one fixed stride, and the entries.
 
-private const val FLAT_FORMAT: Int = 1
+internal const val FLAT_FORMAT: Int = 1
 
 private const val S_CONFIG = "CNFG"
 private const val S_VECTORS = "VECT"

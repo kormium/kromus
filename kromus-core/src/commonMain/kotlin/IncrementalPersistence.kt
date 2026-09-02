@@ -33,8 +33,13 @@ private const val HYBRID_DELTA_FORMAT: Int = 1
  * with different content, and replaying one's delta onto the other's snapshot would corrupt it
  * silently. Hashing the bytes makes the check depend on the actual history. FNV-1a is integer
  * arithmetic only — no dependency, identical on every target.
+ *
+ * Zero is not a revision: `needsFullSnapshot` reads it as "nothing has been encoded yet", so a
+ * snapshot that hashed to it would insist forever that it needs a full one and refuse every delta.
+ * One hash in 2^64 lands there, which is never — but the invariant is cheaper to keep than to reason
+ * about, and it stops being an invariant the moment nothing enforces it.
  */
-internal fun revisionOf(bytes: ByteArray): Long = checksumOf(bytes)
+internal fun revisionOf(bytes: ByteArray): Long = checksumOf(bytes).let { if (it == 0L) 1L else it }
 
 private fun ByteReader.expectParent(actual: Long, what: String) {
     val declared = long()

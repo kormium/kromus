@@ -98,4 +98,21 @@ class ProvenanceTest {
             decodeVectorIndex(base, listOf(delta), KeyCodec.int, expect = "other")
         }
     }
+
+    @Test
+    fun theClusteredAndFlatIndexesAreReadableWithoutDecodingThem() {
+        // provenanceOf is what decides whether an asset is worth fetching, which is a decision made
+        // before anything is decoded — so it has to know every kind that can carry a provenance, not
+        // only the kinds that existed when it was written.
+        val entries = List(30) { IvfEntry(it, vec(it)) }
+
+        val ivf = IvfIndex.build(dim, entries, config = IvfConfig(clusters = 3, nprobe = 2))
+            .encodeToByteArray(KeyCodec.int, provenance = "minilm-l6-v2/ivf")
+        assertEquals("minilm-l6-v2/ivf", provenanceOf(ivf))
+
+        val flat = FlatIndex.build(dim, entries).encodeToByteArray(KeyCodec.int, provenance = "minilm-l6-v2/flat")
+        assertEquals("minilm-l6-v2/flat", provenanceOf(flat))
+
+        assertNull(provenanceOf(FlatIndex.build(dim, entries).encodeToByteArray(KeyCodec.int)))
+    }
 }

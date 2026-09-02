@@ -128,6 +128,67 @@ class PersistenceRobustnessTest {
     /** The format version this build writes, read back off a blob it just produced. */
     private fun vectorFormatVersion(bytes: ByteArray): Int = bytes[5].toInt() and 0xFF
 
+    private fun ivfIndex(): IvfIndex<Int> {
+        val rng = Random(23)
+        val entries = List(60) { IvfEntry(it, FloatArray(8) { rng.nextFloat() }) }
+        return IvfIndex.build(8, entries, config = IvfConfig(clusters = 4, nprobe = 2))
+    }
+
+    @Test
+    fun rejectsACraftedDistinctCountInsteadOfSearchingAgainstIt() {
+        // A clustered index keeps two counts: stored copies, and the distinct entries they came from.
+        // A search sizes its deduplication marks by the second and indexes them by the first, so a
+        // count that does not describe the file is an IndexOutOfBounds thousands of reads later — or,
+        // at zero, no exception at all and every search silently empty.
+        val e = assertFailsWith<KromusFormatException> {
+            decodeIvfIndex(craftedIvfIndex(distinctEntries = 0), KeyCodec.int)
+        }
+        assertTrue(e.message!!.contains("distinct"), e.message!!)
+
+        val tooMany = assertFailsWith<KromusFormatException> {
+            decodeIvfIndex(craftedIvfIndex(distinctEntries = 0x7F000000), KeyCodec.int)
+        }
+        assertTrue(tooMany.message!!.contains("distinct"), tooMany.message!!)
+    }
+
+    @Test
+    fun rejectsACraftedOriginInsteadOfIndexingWithIt() {
+        val e = assertFailsWith<KromusFormatException> {
+            decodeIvfIndex(craftedIvfIndex(firstOrigin = 0x7F000000), KeyCodec.int)
+        }
+        assertTrue(e.message!!.contains("comes from entry"), e.message!!)
+    }
+
+    /** As [craftedVectorIndex], for the clustered format: one declared quantity replaced, nothing else. */
+    private fun craftedIvfIndex(distinctEntries: Int = -1, firstOrigin: Int = -1): ByteArray {
+        val real = ivfIndex().encodeToByteArray(KeyCodec.int)
+        val version = real[5].toInt() and 0xFF
+        val reader = ContainerReader(real, KIND_IVF, version, expect = null)
+        val c = ContainerWriter(KIND_IVF, version, provenance = null)
+        for (tag in listOf("CNFG", "CNTR", "CLST", "VECT", "ENTR", "ORIG", "ROUT")) {
+            if (!reader.has(tag)) continue
+            val body = reader.sectionBytes(tag)
+            c.section(tag) {
+                when {
+                    // The distinct count sits after dimensions, metric, clusters, nprobe,
+                    // targetRecall, assignments, routing, seed, iterations, quantization, the stored
+                    // count and the cluster count: 4 + 1 + 4 + 4 + 4 + 4 + 1 + 8 + 4 + 1 + 4 + 4.
+                    tag == "CNFG" && distinctEntries >= 0 -> {
+                        raw(body.copyOfRange(0, 43))
+                        int(distinctEntries)
+                        raw(body.copyOfRange(47, body.size))
+                    }
+                    tag == "ORIG" && firstOrigin >= 0 -> {
+                        int(firstOrigin)
+                        raw(body.copyOfRange(4, body.size))
+                    }
+                    else -> raw(body)
+                }
+            }
+        }
+        return c.toByteArray()
+    }
+
     @Test
     fun rejectsAGarbledInteriorWithoutAnIndexOutOfBounds() {
         val rng = Random(3)

@@ -247,6 +247,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   inherit the default. This affected `VectorIndex` too, whose searchers have always been documented to
   run at the same time.
 
+- **A crafted clustered index is refused at decode rather than at search.** The distinct-entry count
+  and the origin of each stored copy went unvalidated, so a file that disagreed with itself produced
+  an `IndexOutOfBoundsException` thousands of reads into a query — or, with a distinct count of zero,
+  no exception at all and every search silently empty. Both are bounds-checked now, like every other
+  id-like field in the format.
+
+- **`provenanceOf` reads the clustered and flat formats.** Both accept a provenance and record it, but
+  the reader knew only the three older kinds and refused them as "unknown kind" — so the one thing it
+  exists for, deciding whether to fetch a newer asset without decoding the current one, did not work
+  for the two newest index types.
+
+- **A snapshot whose checksum is zero is no longer stuck needing a full one.** `revisionOf` had lost
+  the rule that folds a zero hash onto one, while `needsFullSnapshot` still reads zero as "never
+  encoded". One hash in 2^64, and an invariant that nothing enforced.
+
 - **A corrupt node level no longer exhausts the heap.** A level is a count in disguise — `level + 1`
   adjacency lists follow it — but it was validated only for being non-negative, so a corrupt two
   billion reached `Array(level + 1)` and took the process down before any other check ran. That is the
