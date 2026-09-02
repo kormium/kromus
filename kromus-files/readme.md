@@ -22,7 +22,7 @@ of your own needs only core.
 | type | targets | how it reads |
 | --- | --- | --- |
 | `FileByteSource` | JVM, Android | positional `FileChannel.read`, which never moves a shared cursor — one open file serves every thread that searches |
-| `FileByteSource` | iOS, macOS, Linux, Windows | buffered `fopen`/`fseek`/`fread`; one source per thread, since a seek and a read are two calls |
+| `FileByteSource` | iOS, macOS, Linux, Windows | buffered `fopen`/`fseek`/`fread`; a seek and a read are two calls, so the pair is serialized and searches take turns inside it |
 | `NodeFileByteSource` | Node (Kotlin/JS and Kotlin/Wasm) | `fs.readSync` |
 | `OpfsByteSource` | browser (Kotlin/JS and Kotlin/Wasm) | a synchronous OPFS access handle — **worker only** |
 

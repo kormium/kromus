@@ -299,7 +299,7 @@ against a number chosen to pass.
 | source | where | notes |
 | --- | --- | --- |
 | `FileByteSource` | JVM, Android | positional `FileChannel` reads; one open file serves every thread |
-| `FileByteSource` | iOS, macOS, Linux, Windows | buffered `fopen`/`fseek`/`fread`; one source per thread |
+| `FileByteSource` | iOS, macOS, Linux, Windows | buffered `fopen`/`fseek`/`fread`; the seek and the read are serialized, so one source still serves every thread |
 | `NodeFileByteSource` | Node (JS and Wasm) | `fs.readSync` |
 | `OpfsByteSource` | browser (JS and Wasm) | **worker only** — see below |
 
@@ -375,8 +375,10 @@ synchronous file access, and anything else is the same interface and nothing mor
 reader, an Android `AssetFileDescriptor`, a virtual file system, a cache that fetches and spills to
 local storage.
 
-The one rule that is not optional: **`read` must fill exactly what was asked for.** Returning early is
-the single failure this interface cannot detect — a partly-filled buffer leaves whatever was there
+Two rules that are not optional. **`read` must tolerate concurrent calls**, because an index reading
+from a source holds one and hands it to every searcher taken from it — an independent read needs
+nothing, a shared cursor has to be serialized. And **`read` must fill exactly what was asked for.**
+Returning early is the single failure this interface cannot detect — a partly-filled buffer leaves whatever was there
 before in the tail, and the scan reads it as vector data. Nothing throws, and the query comes back
 with neighbours that are merely plausible. Loop until the range is complete, and throw
 `KromusFormatException` if it cannot be. Every source in `kromus-files` is tested against a stand-in

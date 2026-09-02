@@ -231,6 +231,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   a gate opened above a phantom waiter is re-parked by every reader it wakes. The regression test
   parks a reader behind a queued writer, cancels the writer, and asserts the reader is woken at all.
 
+- **A file-backed index on Kotlin/Native no longer interleaves two searchers' reads.** A read there is
+  a seek followed by a read, and a streamed index holds one source for every searcher taken from it —
+  so two threads searching one file traded halves of each other's reads and scanned a cluster over
+  another cluster's bytes. Nothing threw; the neighbours were merely plausible. The pair is serialized
+  now, which is what the JVM's positional reads already gave for free. `ByteSource`'s contract says so
+  explicitly: an implementation must tolerate concurrent reads, because an index shares one.
+
 - **A corrupt node level no longer exhausts the heap.** A level is a count in disguise — `level + 1`
   adjacency lists follow it — but it was validated only for being non-negative, so a corrupt two
   billion reached `Array(level + 1)` and took the process down before any other check ran. That is the

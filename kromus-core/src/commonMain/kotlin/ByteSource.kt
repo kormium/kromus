@@ -21,8 +21,10 @@ package io.github.kromus
  * are merely plausible. An implementation over an API that may return fewer bytes than requested —
  * most stream and channel APIs do — must loop until the range is complete, and throw if it cannot be.
  *
- * Implementations need not be thread-safe: a searcher takes one, and searchers are per-thread. An
- * implementation whose reads *are* independent may be shared by several.
+ * **[read] must tolerate being called from several threads at once.** An index reading from a source
+ * holds exactly one and hands it to every searcher taken from it, so what is per-thread is the buffer
+ * a read lands in, not the source it comes from. Independent reads — a positional read, an array
+ * copy — need nothing; a shared cursor has to be serialized, as the native file source does.
  */
 public interface ByteSource {
     /** Total bytes readable from this source. */

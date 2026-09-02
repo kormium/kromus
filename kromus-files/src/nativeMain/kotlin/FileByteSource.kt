@@ -18,6 +18,9 @@ import platform.posix.fopen
 import platform.posix.fread
 import platform.posix.fseek
 import platform.posix.ftell
+import platform.posix.usleep
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /**
  * An index's bytes read from a file, a range at a time.
@@ -31,8 +34,14 @@ import platform.posix.ftell
  * The file is opened read-only and stays open until [close]. An index built on this source stops
  * working the moment it is closed.
  *
- * Not thread-safe: a read seeks and then reads, and two threads sharing one handle would interleave
- * the two halves. Open one source per thread, or serialize access — a searcher is per-thread anyway.
+ * **One source serves several searchers**, because a streamed index holds exactly one and hands it to
+ * every searcher taken from it. A read here is a seek followed by a read, which two threads sharing a
+ * handle would interleave into each other — a cluster scan given another cluster's bytes, reported as
+ * plausible neighbours rather than as an error. So the pair is serialized. The JVM has no equivalent
+ * cost because a positional read carries its own offset; here the offset is state on the handle, and
+ * the alternative — a handle per reader — is a file descriptor nothing would ever close. Concurrent
+ * searches therefore take turns *inside* the read and run in parallel everywhere else, which is the
+ * right trade when the read is a syscall and everything around it is arithmetic.
  *
  * `UnsafeNumber` is opted into because a C long is 64-bit on Unix and 32-bit on Windows, so the
  * commonized `fseek`/`ftell` have different widths per target. Nothing here lets one escape: a
@@ -40,48 +49,68 @@ import platform.posix.ftell
  *
  * @throws KromusFormatException if the path cannot be opened or the range lies outside the file.
  */
-@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class)
+@OptIn(ExperimentalForeignApi::class, UnsafeNumber::class, ExperimentalAtomicApi::class)
 public class FileByteSource private constructor(
     private var handle: CPointer<FILE>?,
     private val base: Long,
     override val size: Int,
     private val path: String,
 ) : ByteSource {
+    // A spin-and-sleep latch rather than a platform mutex: pthreads and Windows critical sections do
+    // not commonize into one native source set, and what this guards is a syscall — an uncontended
+    // acquire is a single compare-and-set, and a contended one has a read to wait out anyway.
+    private val busy = AtomicInt(0)
 
     override fun read(offset: Int, length: Int, into: ByteArray, at: Int) {
         checkRange(offset, length, size)
-        val file = handle ?: throw KromusFormatException("this kromus file source is closed")
         if (length == 0) return
-        // convert() rather than a fixed width: a C long is 64-bit on Unix and 32-bit on Windows, and
-        // a container is bounded to Int.MAX_VALUE bytes, so either holds every offset we can produce.
-        if (fseek(file, (base + offset).convert(), SEEK_SET) != 0) {
-            throw KromusFormatException("cannot seek to ${base + offset} in '$path'")
-        }
-        into.usePinned { pinned ->
-            var done = 0
-            // fread stops short at end of file and on error alike, so a partial read is checked
-            // rather than assumed away: a half-filled buffer is read as vector data downstream.
-            while (done < length) {
-                val got = fread(pinned.addressOf(at + done), 1.convert(), (length - done).convert(), file).toInt()
-                if (got <= 0) {
-                    val why = if (feof(file) != 0) "the file ends early" else "the read failed"
-                    throw KromusFormatException(
-                        "truncated kromus index: $length byte(s) at $offset could not be read from " +
-                            "'$path' — $why after $done byte(s)",
-                    )
-                }
-                done += got
+        while (!busy.compareAndSet(0, 1)) usleep(WAIT_MICROS)
+        try {
+            val file = handle ?: throw KromusFormatException("this kromus file source is closed")
+            // convert() rather than a fixed width: a C long is 64-bit on Unix and 32-bit on Windows,
+            // and a container is bounded to Int.MAX_VALUE bytes, so either holds every offset we can
+            // produce.
+            if (fseek(file, (base + offset).convert(), SEEK_SET) != 0) {
+                throw KromusFormatException("cannot seek to ${base + offset} in '$path'")
             }
+            into.usePinned { pinned ->
+                var done = 0
+                // fread stops short at end of file and on error alike, so a partial read is checked
+                // rather than assumed away: a half-filled buffer is read as vector data downstream.
+                while (done < length) {
+                    val got = fread(pinned.addressOf(at + done), 1.convert(), (length - done).convert(), file).toInt()
+                    if (got <= 0) {
+                        val why = if (feof(file) != 0) "the file ends early" else "the read failed"
+                        throw KromusFormatException(
+                            "truncated kromus index: $length byte(s) at $offset could not be read from " +
+                                "'$path' — $why after $done byte(s)",
+                        )
+                    }
+                    done += got
+                }
+            }
+        } finally {
+            busy.store(0)
         }
     }
 
     override fun close() {
-        val file = handle ?: return
-        handle = null
-        fclose(file)
+        // Closing waits for a read in flight: freeing the handle under one would leave it reading
+        // through a dangling pointer, which is a crash rather than a wrong answer.
+        while (!busy.compareAndSet(0, 1)) usleep(WAIT_MICROS)
+        try {
+            val file = handle ?: return
+            handle = null
+            fclose(file)
+        } finally {
+            busy.store(0)
+        }
     }
 
     public companion object {
+        /** How long a reader waits before trying for the handle again. */
+        private const val WAIT_MICROS: UInt = 20u
+
         /** Opens the whole of [path]. */
         public fun open(path: String): FileByteSource {
             val file = fopen(path, "rb")
