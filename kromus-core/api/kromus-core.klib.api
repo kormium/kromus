@@ -120,6 +120,7 @@ abstract interface io.github.kromus/VectorStore { // io.github.kromus/VectorStor
     abstract fun readVector(io.github.kromus/ByteReader) // io.github.kromus/VectorStore.readVector|readVector(io.github.kromus.ByteReader){}[0]
     abstract fun reconstruct(kotlin/Int): kotlin/FloatArray // io.github.kromus/VectorStore.reconstruct|reconstruct(kotlin.Int){}[0]
     abstract fun writeVector(kotlin/Int, io.github.kromus/ByteWriter) // io.github.kromus/VectorStore.writeVector|writeVector(kotlin.Int;io.github.kromus.ByteWriter){}[0]
+    open fun forSearch(): io.github.kromus/VectorStore // io.github.kromus/VectorStore.forSearch|forSearch(){}[0]
 }
 
 final class <#A: kotlin/Any?> io.github.kromus/FlatIndex : io.github.kromus/VectorSearch<#A> { // io.github.kromus/FlatIndex|null[0]
@@ -331,6 +332,7 @@ final class io.github.kromus/BinaryVectorStore : io.github.kromus/VectorStore { 
     final fun codeAt(kotlin/Int): kotlin/LongArray // io.github.kromus/BinaryVectorStore.codeAt|codeAt(kotlin.Int){}[0]
     final fun distanceBetween(kotlin/Int, kotlin/Int): kotlin/Float // io.github.kromus/BinaryVectorStore.distanceBetween|distanceBetween(kotlin.Int;kotlin.Int){}[0]
     final fun distanceToQuery(kotlin/FloatArray, kotlin/Int): kotlin/Float // io.github.kromus/BinaryVectorStore.distanceToQuery|distanceToQuery(kotlin.FloatArray;kotlin.Int){}[0]
+    final fun forSearch(): io.github.kromus/VectorStore // io.github.kromus/BinaryVectorStore.forSearch|forSearch(){}[0]
     final fun load(kotlin/LongArray): kotlin/Int // io.github.kromus/BinaryVectorStore.load|load(kotlin.LongArray){}[0]
     final fun readVector(io.github.kromus/ByteReader) // io.github.kromus/BinaryVectorStore.readVector|readVector(io.github.kromus.ByteReader){}[0]
     final fun reconstruct(kotlin/Int): kotlin/FloatArray // io.github.kromus/BinaryVectorStore.reconstruct|reconstruct(kotlin.Int){}[0]

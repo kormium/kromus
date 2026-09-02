@@ -19,8 +19,11 @@ import kotlin.math.sqrt
  *
  * **Ids are dense and assigned in order**: the first [add] returns 0, and none is ever reused.
  *
- * A store is not thread-safe by contract. Concurrent searches are arranged above it — see
- * [VectorIndex.searcher] — so an implementation may hold scratch of its own, as the binary one does.
+ * **A store may hold per-query scratch**, as the binary one does — a lookup table it builds once per
+ * query and reads for every vector. Scratch cannot be shared by two searches any more than a
+ * traversal's heaps can, and searchers are meant to run at the same time, so a store that keeps any
+ * hands each searcher its own view through [forSearch]. Writing to a store is still exclusive: what
+ * runs in parallel is reads.
  */
 public interface VectorStore {
     public val dimensions: Int
@@ -43,6 +46,18 @@ public interface VectorStore {
 
     /** Distance between two stored vectors, both in whatever approximate form they are held. */
     public fun distanceBetween(a: Int, b: Int): Float
+
+    /**
+     * This store as one searcher should read it: the same vectors, scratch of its own.
+     *
+     * A store with no per-query state is already shareable and returns itself, which is the default
+     * and what every full-precision or purely per-vector implementation wants. A store that caches
+     * anything about the query has to return a view instead — the vectors behind it stay shared, so
+     * this is a small object and not a copy of the corpus.
+     *
+     * Called once per [Searcher], never per query.
+     */
+    public fun forSearch(): VectorStore = this
 
     /**
      * Appends vector [id] in exactly [strideBytes] bytes.
@@ -262,12 +277,16 @@ public class Int8VectorStore(
  * still governs the scores you get back and any later re-rank), but do not expect binary quantization
  * to preserve inner-product ranking.
  */
-public class BinaryVectorStore(
+public class BinaryVectorStore private constructor(
     override val dimensions: Int,
     override val metric: Metric,
+    // Shared with every view taken through forSearch: the codes are the corpus, and a view is only
+    // ever a second reader of them.
+    private val codes: ArrayList<LongArray>,
 ) : VectorStore {
+    public constructor(dimensions: Int, metric: Metric) : this(dimensions, metric, ArrayList())
+
     private val words = (dimensions + 63) ushr 6
-    private val codes = ArrayList<LongArray>()
     private val invSqrtDim = 1f / sqrt(dimensions.toFloat())
 
     override val size: Int get() = codes.size
@@ -295,6 +314,10 @@ public class BinaryVectorStore(
     //
     // The table is rebuilt whenever a different query array arrives — identity, not equality, because
     // a search hands the same prepared array to every distance call.
+    //
+    // It is also the reason this store cannot be read by two searches at once: they would overwrite
+    // each other's table and read half of the other's, which is wrong distances rather than a crash.
+    // forSearch hands out a view per searcher so that never arises.
 
     private val nibbles = (dimensions + 3) ushr 2
     private var lutQuery: FloatArray? = null
@@ -353,6 +376,9 @@ public class BinaryVectorStore(
             }
         }
     }
+
+    /** A second reader of the same codes, with a lookup table of its own. */
+    override fun forSearch(): VectorStore = BinaryVectorStore(dimensions, metric, codes)
 
     override fun distanceBetween(a: Int, b: Int): Float {
         val ca = codes[a]

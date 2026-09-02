@@ -15,6 +15,7 @@ public final class io/github/kromus/BinaryVectorStore : io/github/kromus/VectorS
 	public final fun codeAt (I)[J
 	public fun distanceBetween (II)F
 	public fun distanceToQuery ([FI)F
+	public fun forSearch ()Lio/github/kromus/VectorStore;
 	public fun getDimensions ()I
 	public fun getMetric ()Lio/github/kromus/Metric;
 	public fun getSize ()I
@@ -166,6 +167,7 @@ public final class io/github/kromus/Float32VectorStore : io/github/kromus/Vector
 	public fun add ([F)I
 	public fun distanceBetween (II)F
 	public fun distanceToQuery ([FI)F
+	public fun forSearch ()Lio/github/kromus/VectorStore;
 	public fun getDimensions ()I
 	public fun getMetric ()Lio/github/kromus/Metric;
 	public fun getSize ()I
@@ -259,6 +261,7 @@ public final class io/github/kromus/Int8VectorStore : io/github/kromus/VectorSto
 	public final fun codeAt (I)[B
 	public fun distanceBetween (II)F
 	public fun distanceToQuery ([FI)F
+	public fun forSearch ()Lio/github/kromus/VectorStore;
 	public fun getDimensions ()I
 	public fun getMetric ()Lio/github/kromus/Metric;
 	public fun getSize ()I
@@ -545,6 +548,7 @@ public abstract interface class io/github/kromus/VectorStore {
 	public abstract fun add ([F)I
 	public abstract fun distanceBetween (II)F
 	public abstract fun distanceToQuery ([FI)F
+	public fun forSearch ()Lio/github/kromus/VectorStore;
 	public abstract fun getDimensions ()I
 	public abstract fun getMetric ()Lio/github/kromus/Metric;
 	public abstract fun getSize ()I
@@ -552,6 +556,10 @@ public abstract interface class io/github/kromus/VectorStore {
 	public abstract fun readVector (Lio/github/kromus/ByteReader;)V
 	public abstract fun reconstruct (I)[F
 	public abstract fun writeVector (ILio/github/kromus/ByteWriter;)V
+}
+
+public final class io/github/kromus/VectorStore$DefaultImpls {
+	public static fun forSearch (Lio/github/kromus/VectorStore;)Lio/github/kromus/VectorStore;
 }
 
 public abstract interface class io/github/kromus/VectorStoreFactory {

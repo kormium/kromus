@@ -36,6 +36,15 @@ internal class SearchScratch {
     /** Distance of the node last returned by a greedy descent, so callers need not recompute it. */
     var greedyDistance: Float = 0f
 
+    // The store this traversal reads distances through. A quantized store may cache something about
+    // the query — the binary one builds a lookup table — and that cache belongs to one traversal for
+    // the same reason the heaps above do. Taken once and kept, because it is per-searcher state, not
+    // per-query state.
+    private var reader: VectorStore? = null
+
+    /** [store] as this traversal should read it; see [VectorStore.forSearch]. */
+    fun readerFor(store: VectorStore): VectorStore = reader ?: store.forSearch().also { reader = it }
+
     fun ensureLayerCapacity(needed: Int) {
         if (layerIds.size >= needed) return
         layerIds = IntArray(needed)

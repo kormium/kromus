@@ -112,6 +112,9 @@ public class FlatSearcher<K> internal constructor(
     private var block = ByteArray(0)
     private var distances = FloatArray(0)
 
+    // The index's store as this searcher reads it; see [VectorStore.forSearch].
+    private val store = index.store.forSearch()
+
     /** How many entries a streamed scan reads at a time. Bounds the buffer on a large corpus. */
     private val batch = 1024
 
@@ -133,7 +136,7 @@ public class FlatSearcher<K> internal constructor(
             for (id in 0 until index.size) {
                 if (filter != null && !filter(index.attrsOf[id])) continue
                 // TopK keeps the largest and a smaller distance is a better hit.
-                top.offer(index.keyOf[id], -index.store.distanceToQuery(prepared, id).toDouble(), id)
+                top.offer(index.keyOf[id], -store.distanceToQuery(prepared, id).toDouble(), id)
             }
         } else {
             // Read in batches rather than whole: a flat index has no partitions to bound the buffer,

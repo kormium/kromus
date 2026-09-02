@@ -238,6 +238,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   now, which is what the JVM's positional reads already gave for free. `ByteSource`'s contract says so
   explicitly: an implementation must tolerate concurrent reads, because an index shares one.
 
+- **Two searchers of a binary-quantized index no longer corrupt each other's distances.** Binary
+  quantization compares a query against stored sign vectors through a lookup table built once per
+  query, and that table lived on the store, which every searcher of an index shares. Concurrent
+  searches overwrote it and read half of each other's — wrong distances, in order, with no error.
+  `VectorStore.forSearch()` is the seam: a store with per-query scratch hands each searcher a view of
+  its own, and the vectors behind it stay shared. Stores with no such scratch are unaffected and
+  inherit the default. This affected `VectorIndex` too, whose searchers have always been documented to
+  run at the same time.
+
 - **A corrupt node level no longer exhausts the heap.** A level is a count in disguise — `level + 1`
   adjacency lists follow it — but it was validated only for being non-negative, so a corrupt two
   billion reached `Array(level + 1)` and took the process down before any other check ran. That is the

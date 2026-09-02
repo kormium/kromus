@@ -15,6 +15,10 @@ public class IvfSearcher<K> internal constructor(
     private var block = ByteArray(0)
     private var distances = FloatArray(0)
 
+    // The index's store as this searcher reads it. A quantized store may cache a per-query table, and
+    // two searchers sharing one would overwrite each other's — see [VectorStore.forSearch].
+    private val store = index.store.forSearch()
+
     // A vector placed in several lists is stored once per list, so two lists a query opens can hold
     // the same entry. Marks plus a monotonic epoch report it once without clearing anything between
     // queries — the same trick the graph traversal uses for its visited set.
@@ -63,7 +67,7 @@ public class IvfSearcher<K> internal constructor(
                     if (!admit(id)) continue
                     if (filter != null && !filter(index.attrsOf[id])) continue
                     // TopK keeps the largest and a smaller distance is a better hit.
-                    top.offer(index.keyOf[id], -index.store.distanceToQuery(prepared, id).toDouble(), id)
+                    top.offer(index.keyOf[id], -store.distanceToQuery(prepared, id).toDouble(), id)
                 }
             } else {
                 val stride = index.strideBytes
