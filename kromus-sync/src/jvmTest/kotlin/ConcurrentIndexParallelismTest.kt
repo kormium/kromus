@@ -330,4 +330,41 @@ class ConcurrentIndexParallelismTest {
             }
         }
     }
+
+    @Test
+    fun readersAloneNeverStrandEachOther() {
+        // Readers contending with *readers* — no writer anywhere, which is what makes this its own
+        // failure rather than a variant of the two above.
+        //
+        // The fast path is a load of `holders` followed by a compare-and-set on it, and that CAS
+        // fails whenever another reader increments first. The slow path took any failure as a reason
+        // to park on the writer gate, and that gate is opened by a hand-off, which comes from a
+        // release, which only runs one when a writer is waiting. With none, the wakeup never comes:
+        // the search waits for a write that a program which only searches never makes.
+        //
+        // A nanosecond-wide race cannot be scheduled, so this buys probability instead: a tiny index
+        // and k = 1 make each critical section as short as it can be, and far more coroutines than
+        // cores keep arrivals overlapping, so the lock is taken about a hundred thousand times in a
+        // second or two. Losing the CAS twice — once outside the queue mutex and once inside it — is
+        // ordinary at that rate and vanishingly rare at the rate an ordinary search produces, which
+        // is why the bug reached a release. The deadline turns the hang into a named failure rather
+        // than a build that never finishes.
+        val guarded = VectorIndex<Int>(dim, Metric.Cosine).concurrent()
+        corpus(60, 61).forEachIndexed { i, v -> runBlocking { guarded.add(i, v) } }
+        val queries = corpus(16, 62)
+
+        runBlocking {
+            withTimeout(120_000) {
+                withContext(Dispatchers.Default) {
+                    val done = (0 until 64).map { w ->
+                        async {
+                            repeat(1500) { r -> guarded.search(queries[(w + r) % queries.size], 1) }
+                            1500
+                        }
+                    }.awaitAll()
+                    assertEquals(64 * 1500, done.sum())
+                }
+            }
+        }
+    }
 }

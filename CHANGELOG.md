@@ -231,6 +231,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   a gate opened above a phantom waiter is re-parked by every reader it wakes. The regression test
   parks a reader behind a queued writer, cancels the writer, and asserts the reader is woken at all.
 
+- **A reader that lost a race to another reader no longer waits for a write that never comes.** The
+  third stranding in this lock, and the one that needs no writer at all. A reader joins the current
+  readers with a compare-and-set on their count, and that CAS fails whenever another reader gets
+  there first — contention between readers, not exclusion by a writer. The slow path treated any
+  failure alike and parked on the writers' gate, which is opened by a hand-off, which comes from a
+  release, which only runs one while a writer is waiting. In a program that is only searching there
+  is never one, so the parked search waited for a write that would never be made, and every later
+  search behind it did too.
+
+  A lost race is retried now; parking is for a writer holding the lock or waiting for it, which is
+  what the gate was always for. Found by a hang in an existing concurrency test, whose thread dump
+  showed every worker idle and no writer anywhere in the picture.
+
 - **A file-backed index on Kotlin/Native no longer interleaves two searchers' reads.** A read there is
   a seek followed by a read, and a streamed index holds one source for every searcher taken from it —
   so two threads searching one file traded halves of each other's reads and scanned a cluster over

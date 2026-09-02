@@ -68,9 +68,23 @@ internal class ReadWriteMutex {
             val gate = queues.withLock {
                 // Re-check inside: the writer may have finished between the failed attempt and here.
                 if (tryAcquireReadFast()) return
+                // The fast path fails for three different reasons, and only two of them are reasons
+                // to park. A writer waiting or a writer holding the lock are: the gate exists to keep
+                // readers out until it leaves, and its release opens the gate. A lost
+                // compare-and-set is not — it means another *reader* incremented the count first,
+                // which is contention between readers, not exclusion by a writer. Parking on that
+                // strands the reader for good: the gate is opened by a hand-off, a hand-off comes
+                // from a release, and a release only runs one when a writer is waiting — which, in a
+                // program that is only searching, nothing ever is. So a lost race is retried, and
+                // the next attempt is the one that wins.
+                //
+                // Deciding here rather than outside is what makes the wakeup safe: a release opens
+                // the gate under this same mutex, so it cannot slip between the decision and the
+                // gate being created.
+                if (holders.load() >= 0 && writersWaiting.load() == 0) return@withLock null
                 readerGate ?: CompletableDeferred<Unit>().also { readerGate = it }
             }
-            gate.await()
+            gate?.await()
         }
     }
 
