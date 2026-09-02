@@ -280,4 +280,54 @@ class ConcurrentIndexParallelismTest {
             }
         }
     }
+
+    @Test
+    fun aWriterCancelledWhileQueuedReleasesTheReadersItWasHoldingBack() {
+        // The same stranding as above, reached by the other exit: not a writer cancelled on its way
+        // into the queue, but one cancelled while sitting in it.
+        //
+        // A reader that arrives while a writer waits cannot take the fast path, so it parks on the
+        // gate, and only a hand-off opens that gate. The reader holding the lock will not run one:
+        // `releaseRead` hands off only when a writer is still waiting, and the cancelled writer has
+        // just stopped being one. Nobody is left to open the gate, and the parked search waits for
+        // the next unrelated write — which, in a program that only searches from here on, never comes.
+        val guarded = VectorIndex<Int>(dim, Metric.Cosine).concurrent()
+        corpus(40, 51).forEachIndexed { i, v -> runBlocking { guarded.add(i, v) } }
+        val query = corpus(1, 52).first()
+
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val reading = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                // A *reader* holds the lock, so the writer below has to queue rather than take it.
+                val holder = launch {
+                    guarded.read {
+                        reading.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                    }
+                }
+                reading.await(10, TimeUnit.SECONDS)
+
+                // Queued behind the reader, and given long enough to actually reach the queue.
+                val writer = launch { guarded.add(9001, query) }
+                Thread.sleep(200)
+
+                // Parked on the gate, because a writer is waiting.
+                val parked = launch { guarded.search(query, 5) }
+                Thread.sleep(200)
+
+                // cancel() only asks; the withdrawal this is about happens as the coroutine unwinds.
+                // Joining pins the order — the writer is gone, and only then does the lock come free.
+                writer.cancel()
+                writer.join()
+
+                release.countDown()
+                holder.join()
+
+                // The assertion is that this reader is ever woken at all.
+                withTimeout(10_000) { parked.join() }
+                assertTrue(guarded.search(query, 5).isNotEmpty())
+            }
+        }
+    }
 }

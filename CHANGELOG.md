@@ -220,6 +220,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   This was found by CI on a two-core runner, where the timing that had made it rare stopped being
   rare.
 
+- **A writer cancelled while queued no longer leaves a search parked forever.** The same stranding as
+  above, reached by the other exit. A reader that arrives while a writer waits cannot take the fast
+  path, so it parks on a gate only a hand-off opens — and when the queued writer is cancelled, nobody
+  runs one: the departing writer just leaves the queue, and the last reader's release skips the
+  hand-off precisely because no writer is waiting any more. The parked search then waits for the next
+  unrelated write, which in a program that only searches from there on never comes.
+
+  A withdrawing writer now hands off itself, after its announcement is withdrawn rather than before —
+  a gate opened above a phantom waiter is re-parked by every reader it wakes. The regression test
+  parks a reader behind a queued writer, cancels the writer, and asserts the reader is woken at all.
+
 - **A corrupt node level no longer exhausts the heap.** A level is a count in disguise — `level + 1`
   adjacency lists follow it — but it was validated only for being non-negative, so a corrupt two
   billion reached `Array(level + 1)` and took the process down before any other check ran. That is the

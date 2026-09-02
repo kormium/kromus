@@ -84,18 +84,26 @@ internal class ReadWriteMutex {
 
     private suspend fun acquireWrite() {
         // Announced before anything else, so arriving readers start queueing immediately — and undone
-        // in a `finally`, because every way out of here has to undo it. Taking the queue mutex below
-        // suspends, so cancellation can leave by a path that never reaches the end of this function;
-        // an increment left behind there is permanent, and permanent is not an exaggeration. The
-        // readers' fast path is disabled while a writer waits, so a phantom waiter disables it for
-        // good: readers queue, are woken, see a writer still waiting, and queue again on a gate that
-        // nothing will ever open. Searches stop, and nothing in the logs says why.
+        // on every way out, because a phantom waiter is permanent, and permanent is not an
+        // exaggeration. The readers' fast path is disabled while a writer waits, so an announcement
+        // left standing disables it for good: readers queue, are woken, see a writer still waiting,
+        // and queue again on a gate that nothing will ever open. Searches stop, and nothing in the
+        // logs says why.
         writersWaiting.addAndFetch(1)
+        // Set only where the lock is ours *and* the caller is going to get it, which is what decides
+        // whether leaving is a plain withdrawal or a hand-over.
+        var acquired = false
         try {
-            if (holders.compareAndSet(0, -1)) return
+            if (holders.compareAndSet(0, -1)) {
+                acquired = true
+                return
+            }
             val signal = queues.withLock {
                 // Re-check inside: the holder may have left between the failed attempt and here.
-                if (holders.compareAndSet(0, -1)) return@acquireWrite
+                if (holders.compareAndSet(0, -1)) {
+                    acquired = true
+                    return@acquireWrite
+                }
                 CompletableDeferred<Unit>().also { writerQueue.addLast(it) }
             }
             // handOff marks us the holder before completing this, so on a normal wake there is
@@ -104,23 +112,42 @@ internal class ReadWriteMutex {
             // queue has to happen either way, and it has to happen uninterruptibly.
             try {
                 signal.await()
+                acquired = true
             } catch (cancellation: Throwable) {
                 withContext(NonCancellable) {
                     queues.withLock {
-                        // Still queued means nobody handed us anything, so leaving is enough.
-                        // Already gone from it means we were made the holder, and the lock has to be
-                        // passed on rather than held forever by a coroutine that is not coming back.
-                        if (!writerQueue.remove(signal)) {
-                            holders.store(0)
-                            handOff()
-                        }
+                        // Still queued means nobody handed us anything, so leaving is enough — the
+                        // `finally` below opens the way for whoever the announcement held back.
+                        // Already gone from it means we were made the holder, and the lock goes back
+                        // to free rather than staying with a coroutine that is not coming back.
+                        if (!writerQueue.remove(signal)) holders.store(0)
                     }
                 }
                 throw cancellation
             }
         } finally {
-            writersWaiting.addAndFetch(-1)
+            if (acquired) {
+                // Holding the lock is not waiting for it; releaseWrite passes it on from here.
+                writersWaiting.addAndFetch(-1)
+            } else {
+                withContext(NonCancellable) { withdraw() }
+            }
         }
+    }
+
+    /**
+     * Stops counting as a waiting writer, and lets through whoever that count was holding back.
+     *
+     * Both halves are needed, and in this order. A reader that parked while this writer was queued is
+     * waiting on a gate only a hand-off opens, and the release that would have run one may already
+     * have decided not to: `releaseRead` skips it when no writer is waiting, which is exactly what
+     * this withdrawal makes true. So the departing writer owes the hand-off itself — and it owes it
+     * *after* the count falls, because readers refuse the fast path while any writer waits, and a
+     * gate opened above a phantom waiter is re-parked by every reader it wakes.
+     */
+    private suspend fun withdraw() {
+        writersWaiting.addAndFetch(-1)
+        queues.withLock { handOff() }
     }
 
     private suspend fun releaseWrite() {
