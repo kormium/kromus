@@ -232,6 +232,7 @@ public class IvfIndex<K> internal constructor(
      */
     public fun probedClusters(query: FloatArray, nprobe: Int = this.nprobe): IntArray {
         require(query.size == dimensions) { "query has ${query.size} dimensions, expected $dimensions" }
+        require(nprobe >= 1) { "nprobe must be >= 1, was $nprobe" }
         if (clusterCount == 0) return IntArray(0)
         return nearestClusters(prepare(query), if (nprobe > clusterCount) clusterCount else nprobe)
     }
@@ -367,8 +368,6 @@ public class IvfIndex<K> internal constructor(
             // list rather than referenced, because a reference would scatter the read that keeping
             // lists contiguous exists to avoid — the duplicate is what preserves the run.
             val copies = if (config.assignments > clustering.k) clustering.k else config.assignments
-            val postings = ArrayList<IntArray>(clustering.k)
-            repeat(clustering.k) { postings.add(IntArray(0)) }
             val perCluster = Array(clustering.k) { ArrayList<Int>() }
             for (i in prepared.indices) {
                 for (c in nearestCentroids(prepared[i], clustering, dimensions, metric, copies)) {

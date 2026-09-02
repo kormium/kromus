@@ -40,6 +40,7 @@ public class IvfSearcher<K> internal constructor(
             "query has ${query.size} dimensions, expected ${index.dimensions}"
         }
         require(k >= 1) { "k must be >= 1, was $k" }
+        require(nprobe >= 1) { "nprobe must be >= 1, was $nprobe" }
         if (index.size == 0) return emptyList()
 
         val prepared = index.preparedQuery(query)

@@ -481,4 +481,61 @@ class IvfIndexTest {
         val recall = hits / (10.0 * queries.size)
         assertTrue(recall > 0.8, "the SPANN preset should find most neighbours, got $recall")
     }
+
+    @Test
+    fun aProbeCountBelowOneIsRefusedRatherThanActedOn() {
+        // nprobe reaches an array size and a heap bound without passing another check, so a negative
+        // one is a NegativeArraySizeException from somewhere inside the router and a zero one is an
+        // empty result that looks like an index with nothing in it.
+        val data = corpus(200, 71)
+        val index = IvfIndex.build(dim, entries(data), config = IvfConfig(clusters = 8, nprobe = 3))
+        val q = data[0]
+
+        assertFailsWith<IllegalArgumentException> { index.search(q, 10, nprobe = 0) }
+        assertFailsWith<IllegalArgumentException> { index.search(q, 10, nprobe = -1) }
+        assertFailsWith<IllegalArgumentException> { index.searcher().search(q, 10, nprobe = -1) }
+        assertFailsWith<IllegalArgumentException> { index.probedClusters(q, nprobe = 0) }
+        assertEquals(1, index.probedClusters(q, nprobe = 1).size)
+    }
+
+    @Test
+    fun dotProductSeedingSpreadsTheStartsInsteadOfRepeatingOne() {
+        // k-means++ weights each candidate by its distance from what has already been chosen. For dot
+        // product that distance is -dot, and nothing normalizes vectors for that metric, so on a
+        // corpus in one halfspace every weight is negative — which used to make the roulette stop on
+        // the first point every time and hand back k copies of one vector.
+        val rng = Random(7)
+        val vectors = List(300) { FloatArray(dim) { rng.nextFloat() + 0.5f } }
+        val k = 8
+
+        val clustering = Kmeans.cluster(vectors, dim, k, Metric.DotProduct, seed = 5, iterations = 0)
+        val distinct = (0 until k)
+            .map { c -> clustering.centroids.copyOfRange(c * dim, (c + 1) * dim).toList() }
+            .toSet()
+        assertEquals(k, distinct.size, "every seeded centroid should be a different point")
+    }
+
+    @Test
+    fun aDotProductIndexFindsItsNeighbours() {
+        // The end of the same story: a clustering that starts from k identical points recovers only
+        // through the empty-cluster rule, and what it costs is recall.
+        val data = corpus(1200, 73)
+        val index = IvfIndex.build(dim, entries(data), Metric.DotProduct, IvfConfig(clusters = 20, nprobe = 4))
+
+        fun truth(q: FloatArray): Set<Int> =
+            data.indices
+                .sortedBy { i ->
+                    var dot = 0f
+                    for (d in 0 until dim) dot += q[d] * data[i][d]
+                    -dot
+                }
+                .take(10)
+                .toSet()
+
+        val queries = List(30) { i -> data[i * 37 % data.size] }
+        var hits = 0
+        queries.forEach { q -> hits += index.search(q, 10).count { it.key in truth(q) } }
+        val recall = hits / (10.0 * queries.size)
+        assertTrue(recall > 0.7, "a dot-product index should find most neighbours, got $recall")
+    }
 }

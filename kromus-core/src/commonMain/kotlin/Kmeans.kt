@@ -105,22 +105,40 @@ internal object Kmeans {
 
         val closest = FloatArray(n) { Float.MAX_VALUE }
         for (c in 1 until k) {
-            var total = 0.0
+            // distanceToCentroid is squared for Euclidean and a cosine distance otherwise; both are
+            // the right weight as they stand. Dot product is the odd one: it reports -dot, which for
+            // vectors that are not normalized — and nothing normalizes them for that metric — is
+            // routinely negative. A negative total makes the roulette below start at or under zero,
+            // so it stops on the first point every time and every centroid after the first becomes
+            // the same vector. Shifting by the smallest weight puts the nearest point at zero and
+            // leaves the ordering alone, which is what the roulette actually needs; where the weights
+            // are already non-negative it changes nothing.
+            var nearest = Float.MAX_VALUE
             for (i in 0 until n) {
-                // distanceToCentroid is already squared for Euclidean and a cosine distance
-                // otherwise; both are the right weight for k-means++ as they stand.
                 val d = distanceToCentroid(vectors[i], into, (c - 1) * dimensions, dimensions, metric)
                 if (d < closest[i]) closest[i] = d
-                total += closest[i].toDouble()
+                if (closest[i] < nearest) nearest = closest[i]
             }
-            var target = rng.nextDouble() * total
-            var picked = n - 1
-            for (i in 0 until n) {
-                target -= closest[i].toDouble()
-                if (target <= 0.0) {
-                    picked = i
-                    break
+            val shift = if (nearest < 0f) nearest.toDouble() else 0.0
+            var total = 0.0
+            for (i in 0 until n) total += closest[i].toDouble() - shift
+
+            var picked: Int
+            if (total > 0.0) {
+                var target = rng.nextDouble() * total
+                picked = n - 1
+                for (i in 0 until n) {
+                    target -= closest[i].toDouble() - shift
+                    if (target <= 0.0) {
+                        picked = i
+                        break
+                    }
                 }
+            } else {
+                // Every point is equally far from what has been chosen, so there is nothing for the
+                // roulette to turn on. Take one by position, as the empty-cluster rule does, rather
+                // than take the first n times over.
+                picked = ((c.toLong() * 7919) % n).toInt()
             }
             vectors[picked].copyInto(into, c * dimensions)
         }

@@ -258,6 +258,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   exists for, deciding whether to fetch a newer asset without decoding the current one, did not work
   for the two newest index types.
 
+- **k-means++ seeding no longer collapses under `Metric.DotProduct`.** The seeding weights each
+  candidate by its distance from what has already been chosen, and for dot product that distance is
+  `-dot`, which on a corpus that is not normalized — and nothing normalizes it for that metric — is
+  routinely negative. A negative total made the roulette stop on the first point every time, so every
+  centroid after the first was the same vector, and clustering started from k identical points and
+  recovered only through the empty-cluster rule. What it cost was recall per probe.
+
+- **`nprobe` is validated like `k`.** `search(q, k, nprobe = -1)` reached an array size and threw
+  `NegativeArraySizeException` from inside the router; `nprobe = 0` returned nothing at all, which
+  reads as an empty index rather than as a bad argument.
+
 - **A snapshot whose checksum is zero is no longer stuck needing a full one.** `revisionOf` had lost
   the rule that folds a zero hash onto one, while `needsFullSnapshot` still reads zero as "never
   encoded". One hash in 2^64, and an invariant that nothing enforced.
