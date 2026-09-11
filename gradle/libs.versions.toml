@@ -3,13 +3,13 @@
 # read from there rather than being repeated per module.
 
 [versions]
-kotlin = "2.4.10"
+kotlin = "2.4.20"
 android-gradle-plugin = "9.2.1"
 coroutines = "1.11.0"
 kemus = "0.3.0"
 onnxruntime = "1.29.0"
 vanniktech-publish = "0.36.0"
-binary-compatibility-validator = "0.18.1"
+binary-compatibility-validator = "0.18.2"
 foojay-resolver = "0.9.0"
 dokka = "2.2.0"
 ktlintGradle = "14.2.0"
