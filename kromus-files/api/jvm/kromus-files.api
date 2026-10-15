@@ -1,0 +1,14 @@
+public final class io/github/kromus/files/FileByteSource : io/github/kromus/ByteSource {
+	public static final field Companion Lio/github/kromus/files/FileByteSource$Companion;
+	public synthetic fun <init> (Ljava/nio/channels/FileChannel;JILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	public fun getSize ()I
+	public fun read (II[BI)V
+}
+
+public final class io/github/kromus/files/FileByteSource$Companion {
+	public final fun open (Ljava/io/File;)Lio/github/kromus/files/FileByteSource;
+	public final fun open (Ljava/lang/String;)Lio/github/kromus/files/FileByteSource;
+	public final fun openRange (Ljava/lang/String;JI)Lio/github/kromus/files/FileByteSource;
+}
+

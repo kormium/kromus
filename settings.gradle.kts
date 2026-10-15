@@ -44,6 +44,11 @@ include(
 // A JVM app rather than a test: it takes minutes at realistic sizes. `./gradlew :benchmarks:run`.
 include("benchmarks")
 
+// kromus-files — optional file-backed ByteSource implementations, one per platform, so an index can
+// be searched without inflating its vectors into memory. The seam itself lives in kromus-core; this
+// module is only the platform half.
+include("kromus-files")
+
 // kromus-kemus — optional adapter that persists an index into a kemus store (embedded / offline /
 // online sync). Depends on io.github.kormium:kemus-core, published to Maven Central.
 include("kromus-kemus")

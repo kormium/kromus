@@ -106,6 +106,7 @@ allprojects {
 // out-of-band via ORG_GRADLE_PROJECT_* env vars in CI — see gradle.properties.
 val publishableModules = setOf(
     "kromus-core",
+    "kromus-files",
     "kromus-kemus",
     "kromus-onnx",
     "kromus-sync",
@@ -117,6 +118,11 @@ val moduleDescriptions = mapOf(
             "kromus — an embedded, reflection-free Kotlin Multiplatform hybrid search engine: a pure-Kotlin " +
                 "HNSW vector index with a full-text/BM25 layer and RRF hybrid queries, quantization, metadata " +
                 "filters and binary persistence, running on JVM, Android, iOS, Native and the web (Wasm)."
+        ),
+    "kromus-files" to
+        (
+            "kromus-files — file-backed ByteSource implementations for kromus, one per platform, so an " +
+                "index can be searched from a file instead of being inflated into memory."
         ),
     "kromus-kemus" to
         (

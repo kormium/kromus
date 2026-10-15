@@ -61,22 +61,132 @@ class PersistenceRobustnessTest {
     }
 
     @Test
-    fun rejectsACorruptedCountInsteadOfAllocatingForIt() {
+    fun aSingleFlippedByteIsCaughtByTheSectionChecksum() {
+        // What sections buy that a flat stream could not: corruption is *located*. A flipped bit in a
+        // vector used to change a result silently — every value in range is a plausible value, so
+        // nothing about the bytes said they had changed.
         val bytes = vectorIndex().encodeToByteArray(KeyCodec.int)
-        // The node count sits right after the header, the provenance flag and the config block; blow
-        // it up to a number no blob this size could hold. Spelled out field by field so that a format
-        // change breaks this line visibly rather than shifting it onto some other field.
-        val header = 6
-        val provenanceAbsent = 1
-        val config = 4 + 1 + 4 + 4 + 4 + 8 + 1 + 4 // dimensions, metric, m, efC, efS, seed, quant, maxVisited
-        val offset = header + provenanceAbsent + config
-        bytes[offset] = 0x7F
-        bytes[offset + 1] = 0x00
-        bytes[offset + 2] = 0x00
-        bytes[offset + 3] = 0x00
+        val target = bytes.size - 20
+        bytes[target] = (bytes[target].toInt() xor 0x01).toByte()
 
         val e = assertFailsWith<KromusFormatException> { decodeVectorIndex(bytes, KeyCodec.int) }
-        assertTrue(e.message!!.contains("count"), e.message!!)
+        assertTrue(e.message!!.contains("checksum"), e.message!!)
+    }
+
+    @Test
+    fun rejectsACraftedNodeCountInsteadOfAllocatingForIt() {
+        // A checksum catches a damaged file. It cannot catch a crafted one: a producer with a bug
+        // writes an absurd count and a checksum that matches it perfectly. The bounds guards are what
+        // stand between that and an allocation nobody asked for, so they need testing directly.
+        val e = assertFailsWith<KromusFormatException> {
+            decodeVectorIndex(craftedVectorIndex(nodeCount = 0x7F000000), KeyCodec.int)
+        }
+        assertTrue(e.message!!.contains("section"), e.message!!)
+    }
+
+    @Test
+    fun rejectsACraftedLevelInsteadOfAllocatingForIt() {
+        // A level is a count in disguise: level + 1 adjacency lists follow it. Two bytes bound it to
+        // 65 535, which is still far more than a small file can describe.
+        val e = assertFailsWith<KromusFormatException> {
+            decodeVectorIndex(craftedVectorIndex(firstLevel = 0xFFFF), KeyCodec.int)
+        }
+        assertTrue(e.message!!.contains("neighbour") || e.message!!.contains("truncated"), e.message!!)
+    }
+
+    /**
+     * Rebuilds a real index's container with one declared quantity replaced — right magic, right
+     * sections, checksums that match. This is the file a buggy writer produces, and the one no
+     * checksum can ever catch.
+     */
+    private fun craftedVectorIndex(nodeCount: Int = -1, firstLevel: Int = -1): ByteArray {
+        val real = vectorIndex().encodeToByteArray(KeyCodec.int)
+        val reader = ContainerReader(real, KIND_VECTOR, vectorFormatVersion(real), expect = null)
+        val c = ContainerWriter(KIND_VECTOR, vectorFormatVersion(real), provenance = null)
+        for (tag in listOf("CNFG", "LVLS", "DELT", "ADJC", "VECT", "ENTR")) {
+            val body = reader.sectionBytes(tag)
+            c.section(tag) {
+                when {
+                    // The node count sits after dimensions, metric, m, efC, efS, seed, quantization
+                    // and maxVisited: 4 + 1 + 4 + 4 + 4 + 8 + 1 + 4.
+                    tag == "CNFG" && nodeCount >= 0 -> {
+                        raw(body.copyOfRange(0, 30))
+                        int(nodeCount)
+                        raw(body.copyOfRange(34, body.size))
+                    }
+                    tag == "LVLS" && firstLevel >= 0 -> {
+                        short(firstLevel)
+                        raw(body.copyOfRange(2, body.size))
+                    }
+                    else -> raw(body)
+                }
+            }
+        }
+        return c.toByteArray()
+    }
+
+    /** The format version this build writes, read back off a blob it just produced. */
+    private fun vectorFormatVersion(bytes: ByteArray): Int = bytes[5].toInt() and 0xFF
+
+    private fun ivfIndex(): IvfIndex<Int> {
+        val rng = Random(23)
+        val entries = List(60) { IvfEntry(it, FloatArray(8) { rng.nextFloat() }) }
+        return IvfIndex.build(8, entries, config = IvfConfig(clusters = 4, nprobe = 2))
+    }
+
+    @Test
+    fun rejectsACraftedDistinctCountInsteadOfSearchingAgainstIt() {
+        // A clustered index keeps two counts: stored copies, and the distinct entries they came from.
+        // A search sizes its deduplication marks by the second and indexes them by the first, so a
+        // count that does not describe the file is an IndexOutOfBounds thousands of reads later — or,
+        // at zero, no exception at all and every search silently empty.
+        val e = assertFailsWith<KromusFormatException> {
+            decodeIvfIndex(craftedIvfIndex(distinctEntries = 0), KeyCodec.int)
+        }
+        assertTrue(e.message!!.contains("distinct"), e.message!!)
+
+        val tooMany = assertFailsWith<KromusFormatException> {
+            decodeIvfIndex(craftedIvfIndex(distinctEntries = 0x7F000000), KeyCodec.int)
+        }
+        assertTrue(tooMany.message!!.contains("distinct"), tooMany.message!!)
+    }
+
+    @Test
+    fun rejectsACraftedOriginInsteadOfIndexingWithIt() {
+        val e = assertFailsWith<KromusFormatException> {
+            decodeIvfIndex(craftedIvfIndex(firstOrigin = 0x7F000000), KeyCodec.int)
+        }
+        assertTrue(e.message!!.contains("comes from entry"), e.message!!)
+    }
+
+    /** As [craftedVectorIndex], for the clustered format: one declared quantity replaced, nothing else. */
+    private fun craftedIvfIndex(distinctEntries: Int = -1, firstOrigin: Int = -1): ByteArray {
+        val real = ivfIndex().encodeToByteArray(KeyCodec.int)
+        val version = real[5].toInt() and 0xFF
+        val reader = ContainerReader(real, KIND_IVF, version, expect = null)
+        val c = ContainerWriter(KIND_IVF, version, provenance = null)
+        for (tag in listOf("CNFG", "CNTR", "CLST", "VECT", "ENTR", "ORIG", "ROUT")) {
+            if (!reader.has(tag)) continue
+            val body = reader.sectionBytes(tag)
+            c.section(tag) {
+                when {
+                    // The distinct count sits after dimensions, metric, clusters, nprobe,
+                    // targetRecall, assignments, routing, seed, iterations, quantization, the stored
+                    // count and the cluster count: 4 + 1 + 4 + 4 + 4 + 4 + 1 + 8 + 4 + 1 + 4 + 4.
+                    tag == "CNFG" && distinctEntries >= 0 -> {
+                        raw(body.copyOfRange(0, 43))
+                        int(distinctEntries)
+                        raw(body.copyOfRange(47, body.size))
+                    }
+                    tag == "ORIG" && firstOrigin >= 0 -> {
+                        int(firstOrigin)
+                        raw(body.copyOfRange(4, body.size))
+                    }
+                    else -> raw(body)
+                }
+            }
+        }
+        return c.toByteArray()
     }
 
     @Test
@@ -165,26 +275,5 @@ class PersistenceRobustnessTest {
         index.add(1, floatArrayOf(1f, 0f, 0f, 0f))
         val restored = decodeVectorIndex(index.encodeToByteArray(KeyCodec.int), KeyCodec.int)
         assertEquals(1234, restored.config.maxVisited)
-    }
-
-    @Test
-    fun rejectsACorruptedLevelInsteadOfAllocatingForIt() {
-        // A level is a count in disguise: level + 1 adjacency lists follow it. Validating only that it
-        // is non-negative let a corrupt two-billion through to `Array(level + 1)`, which exhausted the
-        // heap before any other check ran — the failure every other length in this format is guarded
-        // against, reached by the one field that was not.
-        val bytes = vectorIndex().encodeToByteArray(KeyCodec.int)
-        val header = 6
-        val provenanceAbsent = 1
-        val config = 4 + 1 + 4 + 4 + 4 + 8 + 1 + 4
-        val nodeCount = 4
-        val level = header + provenanceAbsent + config + nodeCount // the first node's level
-        bytes[level] = 0x7F
-        bytes[level + 1] = 0x00
-        bytes[level + 2] = 0x00
-        bytes[level + 3] = 0x00
-
-        val e = assertFailsWith<KromusFormatException> { decodeVectorIndex(bytes, KeyCodec.int) }
-        assertTrue(e.message!!.contains("level"), e.message!!)
     }
 }

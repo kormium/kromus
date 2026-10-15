@@ -26,17 +26,26 @@ package io.github.kromus
  * @property config HNSW tuning; see [HnswConfig].
  */
 public class VectorIndex<K> private constructor(
-    public val dimensions: Int,
-    public val metric: Metric,
+    override val dimensions: Int,
+    override val metric: Metric,
     public val config: HnswConfig,
     private var hnsw: Hnsw,
-) {
-    /** Creates an empty index. */
+    private val storeFactory: VectorStoreFactory? = null,
+) : VectorSearch<K> {
+    /**
+     * Creates an empty index.
+     *
+     * @param store a quantizer of your own; the built-in [HnswConfig.quantization] is used when null.
+     *   It is kept, because [compact] and [clear] rebuild the graph and must rebuild it on the same
+     *   storage — and it has to be supplied again when the index is read back, since nothing in the
+     *   bytes names it.
+     */
     public constructor(
         dimensions: Int,
         metric: Metric = Metric.Cosine,
         config: HnswConfig = HnswConfig(),
-    ) : this(dimensions, metric, config, Hnsw(dimensions, metric, config))
+        store: VectorStoreFactory? = null,
+    ) : this(dimensions, metric, config, Hnsw(dimensions, metric, config, store), store)
 
     init {
         require(dimensions >= 1) { "dimensions must be >= 1, was $dimensions" }
@@ -67,7 +76,7 @@ public class VectorIndex<K> private constructor(
     private val dirtyEntryIds = HashSet<Int>()
 
     /** Number of live (non-removed) entries. */
-    public val size: Int get() = idOf.size
+    override val size: Int get() = idOf.size
 
     /**
      * How many internal slots have changed since the last [encodeToByteArray] or [encodeDelta] — a
@@ -93,9 +102,9 @@ public class VectorIndex<K> private constructor(
     public val tombstones: Int get() = hnsw.tombstones
 
     /** The live keys, in insertion order of their current vectors. Read-only; do not retain across edits. */
-    public val keys: Set<K> get() = idOf.keys
+    override val keys: Set<K> get() = idOf.keys
 
-    public operator fun contains(key: K): Boolean = idOf.containsKey(key)
+    override operator fun contains(key: K): Boolean = idOf.containsKey(key)
 
     /**
      * Inserts [vector] under [key], replacing any existing vector for that key. The array is copied.
@@ -209,7 +218,7 @@ public class VectorIndex<K> private constructor(
      * is exactly the situation it exists to avoid. Give each reader its own, and prefer about as many
      * as there are physical cores — past that they contend rather than scale.
      */
-    public fun searcher(): VectorSearcher<K> = VectorSearcher(this)
+    override fun searcher(): VectorSearcher<K> = VectorSearcher(this)
 
     /**
      * Replaces the [attributes][add] stored for [key] without touching the graph.
@@ -263,7 +272,7 @@ public class VectorIndex<K> private constructor(
         if (reclaimed == 0) return 0
 
         val oldStore = hnsw.store()
-        val fresh = Hnsw(dimensions, metric, config)
+        val fresh = Hnsw(dimensions, metric, config, storeFactory)
         val liveCount = idOf.size
         val newKeyOf = ArrayList<K?>(liveCount)
         val newAttrs = ArrayList<Map<String, String>>(liveCount)
@@ -294,7 +303,7 @@ public class VectorIndex<K> private constructor(
 
     /** Removes every entry and releases the graph. */
     public fun clear() {
-        hnsw = Hnsw(dimensions, metric, config)
+        hnsw = Hnsw(dimensions, metric, config, storeFactory)
         idOf.clear()
         keyOf.clear()
         attrsOf.clear()
@@ -348,8 +357,9 @@ public class VectorIndex<K> private constructor(
             liveKeys: Map<K, Int>,
             liveAttrs: Map<Int, Map<String, String>>,
             capacity: Int,
+            store: VectorStoreFactory? = null,
         ): VectorIndex<K> {
-            val index = VectorIndex<K>(dimensions, metric, config, hnsw)
+            val index = VectorIndex<K>(dimensions, metric, config, hnsw, store)
             repeat(capacity) {
                 index.keyOf.add(null)
                 index.attrsOf.add(emptyMap())

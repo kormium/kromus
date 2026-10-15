@@ -23,8 +23,8 @@ internal class Hnsw private constructor(
     private val config: HnswConfig,
     private val store: VectorStore,
 ) {
-    constructor(dimensions: Int, metric: Metric, config: HnswConfig) :
-        this(metric, config, newStore(dimensions, metric, config.quantization))
+    constructor(dimensions: Int, metric: Metric, config: HnswConfig, store: VectorStoreFactory? = null) :
+        this(metric, config, store?.create(dimensions, metric) ?: newStore(dimensions, metric, config.quantization))
 
     // Id-indexed graph columns, parallel to the store and sized by nodeCount. levels[id] is the
     // node's top layer; neighbors[id][layer] its adjacency list on that layer (present only for
@@ -98,7 +98,7 @@ internal class Hnsw private constructor(
 
         // Greedy descent through the layers above the new node's top level (ef = 1).
         var curr = entryPoint
-        var currDist = store.distanceToQuery(prepared, curr)
+        var currDist = ownScratch.readerFor(store).distanceToQuery(prepared, curr)
         var lc = topLayer
         while (lc > level) {
             curr = greedyClosest(ownScratch, prepared, curr, currDist, lc)
@@ -163,7 +163,7 @@ internal class Hnsw private constructor(
         val q = prepare(rawVector)
 
         var curr = entryPoint
-        var currDist = store.distanceToQuery(q, curr)
+        var currDist = scratch.readerFor(store).distanceToQuery(q, curr)
         var lc = topLayer
         while (lc > 0) {
             curr = greedyClosest(scratch, q, curr, currDist, lc)
@@ -198,6 +198,7 @@ internal class Hnsw private constructor(
         startDist: Float,
         layer: Int,
     ): Int {
+        val reader = scratch.readerFor(store)
         var curr = start
         var currDist = startDist
         var improved = true
@@ -207,7 +208,7 @@ internal class Hnsw private constructor(
             if (nb != null) {
                 for (i in 0 until nb.size) {
                     val n = nb[i]
-                    val d = store.distanceToQuery(query, n)
+                    val d = reader.distanceToQuery(query, n)
                     if (d < currDist) {
                         currDist = d
                         curr = n
@@ -238,6 +239,7 @@ internal class Hnsw private constructor(
         maxVisited: Int,
         acceptable: (Int) -> Boolean,
     ) {
+        val reader = scratch.readerFor(store)
         val frontier = scratch.frontier
         val best = scratch.best
         scratch.beginVisits(nodeCount)
@@ -250,7 +252,7 @@ internal class Hnsw private constructor(
         for (ep in entryPoints) {
             if (!scratch.visit(ep)) continue
             visits++
-            val d = store.distanceToQuery(query, ep)
+            val d = reader.distanceToQuery(query, ep)
             frontier.push(ep, d)
             if (acceptable(ep)) {
                 best.push(ep, d)
@@ -268,7 +270,7 @@ internal class Hnsw private constructor(
                 val e = nb[i]
                 if (!scratch.visit(e)) continue
                 visits++
-                val d = store.distanceToQuery(query, e)
+                val d = reader.distanceToQuery(query, e)
                 // Explore whenever results aren't full yet or this node beats the current worst.
                 val bound = if (best.size < ef) Float.MAX_VALUE else best.peekKey()
                 if (d < bound) {

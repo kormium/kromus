@@ -230,4 +230,141 @@ class ConcurrentIndexParallelismTest {
             }
         }
     }
+
+    @Test
+    fun aWriterCancelledWhileQueueingDoesNotDisableTheReadersForever() {
+        // The other half of the same problem, and the one that does not look like a lock at all.
+        //
+        // A writer announces itself before it queues, because that announcement is what makes the
+        // lock writer-preferring — arriving readers stop taking the fast path. Announcing and then
+        // leaving by a path that does not withdraw it produces a waiter that does not exist, and the
+        // readers' fast path stays off for the life of the lock: each one queues, is woken, sees a
+        // writer still waiting, and queues again on a gate nothing will open. Writers keep working
+        // throughout, which is what makes it hard to attribute — the index is not stuck, only every
+        // search is.
+        //
+        // Cancelling a writer while it is waiting for the queue mutex is the window, so the mutex is
+        // kept busy: many writers arriving at once, cancelled almost immediately.
+        val guarded = VectorIndex<Int>(dim, Metric.Cosine).concurrent()
+        corpus(40, 41).forEachIndexed { i, v -> runBlocking { guarded.add(i, v) } }
+        val query = corpus(1, 42).first()
+
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val holding = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                val holder = launch {
+                    guarded.use {
+                        holding.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                    }
+                }
+                holding.await(10, TimeUnit.SECONDS)
+
+                // Contend for the queue mutex rather than for the lock: every one of these has to
+                // take it to enqueue, and every one is cancelled while it may still be waiting for it.
+                repeat(12) {
+                    val wave = (0 until 25).map { n -> launch { guarded.add(2000 + n, query) } }
+                    Thread.sleep(1)
+                    wave.forEach { it.cancel() }
+                }
+
+                release.countDown()
+                holder.join()
+
+                // A search is the assertion. A stranded lock would fail the previous test; this one
+                // fails only if the readers' fast path was switched off and left off.
+                withTimeout(10_000) {
+                    repeat(20) { assertTrue(guarded.search(query, 5).isNotEmpty()) }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aWriterCancelledWhileQueuedReleasesTheReadersItWasHoldingBack() {
+        // The same stranding as above, reached by the other exit: not a writer cancelled on its way
+        // into the queue, but one cancelled while sitting in it.
+        //
+        // A reader that arrives while a writer waits cannot take the fast path, so it parks on the
+        // gate, and only a hand-off opens that gate. The reader holding the lock will not run one:
+        // `releaseRead` hands off only when a writer is still waiting, and the cancelled writer has
+        // just stopped being one. Nobody is left to open the gate, and the parked search waits for
+        // the next unrelated write — which, in a program that only searches from here on, never comes.
+        val guarded = VectorIndex<Int>(dim, Metric.Cosine).concurrent()
+        corpus(40, 51).forEachIndexed { i, v -> runBlocking { guarded.add(i, v) } }
+        val query = corpus(1, 52).first()
+
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                val reading = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                // A *reader* holds the lock, so the writer below has to queue rather than take it.
+                val holder = launch {
+                    guarded.read {
+                        reading.countDown()
+                        release.await(10, TimeUnit.SECONDS)
+                    }
+                }
+                reading.await(10, TimeUnit.SECONDS)
+
+                // Queued behind the reader, and given long enough to actually reach the queue.
+                val writer = launch { guarded.add(9001, query) }
+                Thread.sleep(200)
+
+                // Parked on the gate, because a writer is waiting.
+                val parked = launch { guarded.search(query, 5) }
+                Thread.sleep(200)
+
+                // cancel() only asks; the withdrawal this is about happens as the coroutine unwinds.
+                // Joining pins the order — the writer is gone, and only then does the lock come free.
+                writer.cancel()
+                writer.join()
+
+                release.countDown()
+                holder.join()
+
+                // The assertion is that this reader is ever woken at all.
+                withTimeout(10_000) { parked.join() }
+                assertTrue(guarded.search(query, 5).isNotEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun readersAloneNeverStrandEachOther() {
+        // Readers contending with *readers* — no writer anywhere, which is what makes this its own
+        // failure rather than a variant of the two above.
+        //
+        // The fast path is a load of `holders` followed by a compare-and-set on it, and that CAS
+        // fails whenever another reader increments first. The slow path took any failure as a reason
+        // to park on the writer gate, and that gate is opened by a hand-off, which comes from a
+        // release, which only runs one when a writer is waiting. With none, the wakeup never comes:
+        // the search waits for a write that a program which only searches never makes.
+        //
+        // A nanosecond-wide race cannot be scheduled, so this buys probability instead: a tiny index
+        // and k = 1 make each critical section as short as it can be, and far more coroutines than
+        // cores keep arrivals overlapping, so the lock is taken about a hundred thousand times in a
+        // second or two. Losing the CAS twice — once outside the queue mutex and once inside it — is
+        // ordinary at that rate and vanishingly rare at the rate an ordinary search produces, which
+        // is why the bug reached a release. The deadline turns the hang into a named failure rather
+        // than a build that never finishes.
+        val guarded = VectorIndex<Int>(dim, Metric.Cosine).concurrent()
+        corpus(60, 61).forEachIndexed { i, v -> runBlocking { guarded.add(i, v) } }
+        val queries = corpus(16, 62)
+
+        runBlocking {
+            withTimeout(120_000) {
+                withContext(Dispatchers.Default) {
+                    val done = (0 until 64).map { w ->
+                        async {
+                            repeat(1500) { r -> guarded.search(queries[(w + r) % queries.size], 1) }
+                            1500
+                        }
+                    }.awaitAll()
+                    assertEquals(64 * 1500, done.sum())
+                }
+            }
+        }
+    }
 }

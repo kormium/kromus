@@ -10,14 +10,18 @@ package io.github.kromus
  */
 public class VectorSearcher<K> internal constructor(
     private val index: VectorIndex<K>,
-) {
+) : Searcher<K> {
     private val scratch = SearchScratch()
+
+    /** As [VectorIndex.search], with this searcher's own traversal state and the index's defaults. */
+    override fun search(query: FloatArray, k: Int, filter: MetadataFilter?): List<SearchResult<K>> =
+        search(query, k, index.config.efSearch, index.config.maxVisited, filter)
 
     /** As [VectorIndex.search], but using this searcher's own traversal state. */
     public fun search(
         query: FloatArray,
         k: Int,
-        efSearch: Int = index.config.efSearch,
+        efSearch: Int,
         maxVisited: Int = index.config.maxVisited,
         filter: MetadataFilter? = null,
     ): List<SearchResult<K>> {

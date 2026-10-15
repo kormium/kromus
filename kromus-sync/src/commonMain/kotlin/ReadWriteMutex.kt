@@ -68,9 +68,23 @@ internal class ReadWriteMutex {
             val gate = queues.withLock {
                 // Re-check inside: the writer may have finished between the failed attempt and here.
                 if (tryAcquireReadFast()) return
+                // The fast path fails for three different reasons, and only two of them are reasons
+                // to park. A writer waiting or a writer holding the lock are: the gate exists to keep
+                // readers out until it leaves, and its release opens the gate. A lost
+                // compare-and-set is not — it means another *reader* incremented the count first,
+                // which is contention between readers, not exclusion by a writer. Parking on that
+                // strands the reader for good: the gate is opened by a hand-off, a hand-off comes
+                // from a release, and a release only runs one when a writer is waiting — which, in a
+                // program that is only searching, nothing ever is. So a lost race is retried, and
+                // the next attempt is the one that wins.
+                //
+                // Deciding here rather than outside is what makes the wakeup safe: a release opens
+                // the gate under this same mutex, so it cannot slip between the decision and the
+                // gate being created.
+                if (holders.load() >= 0 && writersWaiting.load() == 0) return@withLock null
                 readerGate ?: CompletableDeferred<Unit>().also { readerGate = it }
             }
-            gate.await()
+            gate?.await()
         }
     }
 
@@ -83,41 +97,71 @@ internal class ReadWriteMutex {
     }
 
     private suspend fun acquireWrite() {
+        // Announced before anything else, so arriving readers start queueing immediately — and undone
+        // on every way out, because a phantom waiter is permanent, and permanent is not an
+        // exaggeration. The readers' fast path is disabled while a writer waits, so an announcement
+        // left standing disables it for good: readers queue, are woken, see a writer still waiting,
+        // and queue again on a gate that nothing will ever open. Searches stop, and nothing in the
+        // logs says why.
         writersWaiting.addAndFetch(1)
-        if (holders.compareAndSet(0, -1)) {
-            writersWaiting.addAndFetch(-1)
-            return
-        }
-        val signal = queues.withLock {
+        // Set only where the lock is ours *and* the caller is going to get it, which is what decides
+        // whether leaving is a plain withdrawal or a hand-over.
+        var acquired = false
+        try {
             if (holders.compareAndSet(0, -1)) {
-                writersWaiting.addAndFetch(-1)
+                acquired = true
                 return
             }
-            CompletableDeferred<Unit>().also { writerQueue.addLast(it) }
-        }
-        // handOff marks us the holder before completing this, so on a normal wake there is nothing
-        // left to claim. On a cancelled one there is: the lock may already have been handed to a
-        // waiter that will never take it, which strands it for good. Leaving the queue has to happen
-        // either way, and it has to happen uninterruptibly.
-        try {
-            signal.await()
-        } catch (cancellation: Throwable) {
-            withContext(NonCancellable) {
-                queues.withLock {
-                    if (writerQueue.remove(signal)) {
-                        // Still queued: nobody handed us anything, so just stop waiting.
-                        writersWaiting.addAndFetch(-1)
-                    } else {
-                        // Already made the holder — pass it on rather than hold it forever.
-                        writersWaiting.addAndFetch(-1)
-                        holders.store(0)
-                        handOff()
+            val signal = queues.withLock {
+                // Re-check inside: the holder may have left between the failed attempt and here.
+                if (holders.compareAndSet(0, -1)) {
+                    acquired = true
+                    return@acquireWrite
+                }
+                CompletableDeferred<Unit>().also { writerQueue.addLast(it) }
+            }
+            // handOff marks us the holder before completing this, so on a normal wake there is
+            // nothing left to claim. On a cancelled one there is: the lock may already have been
+            // handed to a waiter that will never take it, which strands it for good. Leaving the
+            // queue has to happen either way, and it has to happen uninterruptibly.
+            try {
+                signal.await()
+                acquired = true
+            } catch (cancellation: Throwable) {
+                withContext(NonCancellable) {
+                    queues.withLock {
+                        // Still queued means nobody handed us anything, so leaving is enough — the
+                        // `finally` below opens the way for whoever the announcement held back.
+                        // Already gone from it means we were made the holder, and the lock goes back
+                        // to free rather than staying with a coroutine that is not coming back.
+                        if (!writerQueue.remove(signal)) holders.store(0)
                     }
                 }
+                throw cancellation
             }
-            throw cancellation
+        } finally {
+            if (acquired) {
+                // Holding the lock is not waiting for it; releaseWrite passes it on from here.
+                writersWaiting.addAndFetch(-1)
+            } else {
+                withContext(NonCancellable) { withdraw() }
+            }
         }
+    }
+
+    /**
+     * Stops counting as a waiting writer, and lets through whoever that count was holding back.
+     *
+     * Both halves are needed, and in this order. A reader that parked while this writer was queued is
+     * waiting on a gate only a hand-off opens, and the release that would have run one may already
+     * have decided not to: `releaseRead` skips it when no writer is waiting, which is exactly what
+     * this withdrawal makes true. So the departing writer owes the hand-off itself — and it owes it
+     * *after* the count falls, because readers refuse the fast path while any writer waits, and a
+     * gate opened above a phantom waiter is re-parked by every reader it wakes.
+     */
+    private suspend fun withdraw() {
         writersWaiting.addAndFetch(-1)
+        queues.withLock { handOff() }
     }
 
     private suspend fun releaseWrite() {

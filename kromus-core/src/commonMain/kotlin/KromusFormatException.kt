@@ -17,7 +17,12 @@ package io.github.kromus
  * ```
  *
  * It extends [IllegalArgumentException], so existing `catch (e: IllegalArgumentException)` still works.
+ *
+ * The constructor is public because a [ByteSource] of your own has to be able to report the same
+ * failures the library's own do — a range outside the file, a read that could not be completed. A
+ * caller that catches this to rebuild an index should see the same exception whether the bytes were
+ * malformed or the file they were meant to come from could not be read.
  */
-public class KromusFormatException internal constructor(
+public class KromusFormatException(
     message: String,
 ) : IllegalArgumentException(message)
